@@ -1,0 +1,313 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SRE Memory Agent - Distributed AI SRE Assistant with Agentic Memory
+  AWS resources: Lambda, Step Functions, S3, IAM
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  CockroachDBSecretArn:
+    Type: String
+    Description: ARN of the Secrets Manager secret containing CockroachDB credentials
+  S3BucketName:
+    Type: String
+    Default: sre-memory-agent-artifacts
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 120
+    MemorySize: 512
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        COCKROACHDB_SECRET_ARN: !Ref CockroachDBSecretArn
+        S3_BUCKET: !Ref S3BucketName
+
+Resources:
+  # ===========================================================================
+  # S3 Bucket - Incident artifacts, logs, model outputs
+  # ===========================================================================
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${S3BucketName}-${Environment}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldArtifacts
+            Status: Enabled
+            ExpirationInDays: 90
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ===========================================================================
+  # IAM Role - Bedrock Access (least-privilege)
+  # ===========================================================================
+  BedrockAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "sre-agent-bedrock-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: BedrockInvokePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet-*"
+                  - "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2*"
+        - PolicyName: SecretsAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref CockroachDBSecretArn
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${S3BucketName}-${Environment}/*"
+        - PolicyName: StepFunctionsCallbackPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:SendTaskSuccess
+                  - states:SendTaskFailure
+                  - states:GetActivityTask
+                Resource: "*"
+
+  # ===========================================================================
+  # Lambda Functions - Agent Steps
+  # ===========================================================================
+  IngestionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "sre-agent-ingest-${Environment}"
+      Handler: agents.lambda_handlers.ingest_handler
+      CodeUri: ../
+      Role: !GetAtt BedrockAccessRole.Arn
+      Description: Ingests alerts and triggers the agent workflow
+
+  RetrievalFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "sre-agent-retrieval-${Environment}"
+      Handler: agents.lambda_handlers.retrieval_handler
+      CodeUri: ../
+      Role: !GetAtt BedrockAccessRole.Arn
+      Timeout: 60
+      Description: Retrieval Agent - vector search for similar incidents
+
+  AnalysisFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "sre-agent-analysis-${Environment}"
+      Handler: agents.lambda_handlers.analysis_handler
+      CodeUri: ../
+      Role: !GetAtt BedrockAccessRole.Arn
+      Timeout: 90
+      Description: Analysis Agent - root cause hypothesis via Claude
+
+  DecisionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "sre-agent-decision-${Environment}"
+      Handler: agents.lambda_handlers.decision_handler
+      CodeUri: ../
+      Role: !GetAtt BedrockAccessRole.Arn
+      Timeout: 90
+      Description: Decision Agent - remediation proposal with confidence gating
+
+  WriteMemoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "sre-agent-write-memory-${Environment}"
+      Handler: agents.lambda_handlers.write_memory_handler
+      CodeUri: ../
+      Role: !GetAtt BedrockAccessRole.Arn
+      Timeout: 30
+      Description: Writes resolution back to CockroachDB agent memory
+
+  # ===========================================================================
+  # Step Functions State Machine - Agent Workflow Orchestration
+  # ===========================================================================
+  AgentWorkflowRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "sre-agent-sfn-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt IngestionFunction.Arn
+                  - !GetAtt RetrievalFunction.Arn
+                  - !GetAtt AnalysisFunction.Arn
+                  - !GetAtt DecisionFunction.Arn
+                  - !GetAtt WriteMemoryFunction.Arn
+
+  AgentWorkflow:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "SREAgentWorkflow-${Environment}"
+      RoleArn: !GetAtt AgentWorkflowRole.Arn
+      TracingConfiguration:
+        Enabled: true
+      DefinitionString: !Sub |
+        {
+          "Comment": "SRE Memory Agent - Incident Response Workflow with Human-in-the-Loop",
+          "StartAt": "IngestAlert",
+          "States": {
+            "IngestAlert": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${IngestionFunction.Arn}",
+                "Payload.$": "$"
+              },
+              "ResultPath": "$.ingestion",
+              "Next": "RetrievalAgent"
+            },
+            "RetrievalAgent": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${RetrievalFunction.Arn}",
+                "Payload.$": "$"
+              },
+              "ResultPath": "$.retrieval",
+              "Next": "AnalysisAgent"
+            },
+            "AnalysisAgent": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${AnalysisFunction.Arn}",
+                "Payload.$": "$"
+              },
+              "ResultPath": "$.analysis",
+              "Next": "DecisionAgent"
+            },
+            "DecisionAgent": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${DecisionFunction.Arn}",
+                "Payload.$": "$"
+              },
+              "ResultPath": "$.decision",
+              "Next": "RequiresApproval"
+            },
+            "RequiresApproval": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.decision.Payload.requires_approval",
+                  "BooleanEquals": true,
+                  "Next": "WaitForApproval"
+                }
+              ],
+              "Default": "WriteMemory"
+            },
+            "WaitForApproval": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+              "Parameters": {
+                "FunctionName": "${DecisionFunction.Arn}",
+                "Payload": {
+                  "task_token.$": "$$.Task.Token",
+                  "decision.$": "$.decision"
+                }
+              },
+              "TimeoutSeconds": 3600,
+              "ResultPath": "$.approval",
+              "Next": "WriteMemory"
+            },
+            "WriteMemory": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${WriteMemoryFunction.Arn}",
+                "Payload.$": "$"
+              },
+              "ResultPath": "$.memory_write",
+              "Next": "IncidentResolved"
+            },
+            "IncidentResolved": {
+              "Type": "Succeed"
+            }
+          }
+        }
+
+  # ===========================================================================
+  # Secrets Manager - CockroachDB credentials
+  # ===========================================================================
+  CockroachDBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "sre-agent/cockroachdb-${Environment}"
+      Description: CockroachDB connection credentials for SRE Memory Agent
+      SecretString: |
+        {
+          "host": "REPLACE_WITH_CLUSTER_HOST",
+          "port": 26257,
+          "database": "defaultdb",
+          "user": "REPLACE_WITH_API_KEY",
+          "password": "REPLACE_WITH_API_SECRET",
+          "sslmode": "verify-full"
+        }
+
+Outputs:
+  StateMachineArn:
+    Description: ARN of the SRE Agent Step Functions workflow
+    Value: !Ref AgentWorkflow
+  ArtifactsBucketName:
+    Description: S3 bucket for incident artifacts
+    Value: !Ref ArtifactsBucket
+  IngestionFunctionArn:
+    Description: ARN of the ingestion Lambda
+    Value: !GetAtt IngestionFunction.Arn
+  CockroachDBSecretArn:
+    Description: ARN of the CockroachDB credentials secret
+    Value: !Ref CockroachDBSecret

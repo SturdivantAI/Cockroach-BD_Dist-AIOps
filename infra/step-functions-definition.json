@@ -1,0 +1,167 @@
+{
+  "Comment": "SRE Memory Agent - Incident Response Workflow with Human-in-the-Loop",
+  "StartAt": "IngestAlert",
+  "States": {
+    "IngestAlert": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "sre-agent-ingest-dev",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.ingestion",
+      "Next": "RetrievalAgent",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "IncidentFailed"
+        }
+      ]
+    },
+    "RetrievalAgent": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "sre-agent-retrieval-dev",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.retrieval",
+      "Next": "AnalysisAgent",
+      "TimeoutSeconds": 60,
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "IncidentFailed"
+        }
+      ]
+    },
+    "AnalysisAgent": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "sre-agent-analysis-dev",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.analysis",
+      "Next": "DecisionAgent",
+      "TimeoutSeconds": 90,
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException"],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "IncidentFailed"
+        }
+      ]
+    },
+    "DecisionAgent": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "sre-agent-decision-dev",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.decision",
+      "Next": "RequiresApproval",
+      "TimeoutSeconds": 90,
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "IncidentFailed"
+        }
+      ]
+    },
+    "RequiresApproval": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.decision.Payload.requires_approval",
+          "BooleanEquals": true,
+          "Next": "WaitForApproval"
+        }
+      ],
+      "Default": "WriteMemory"
+    },
+    "WaitForApproval": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "sre-agent-decision-dev",
+        "Payload": {
+          "task_token.$": "$$.Task.Token",
+          "decision.$": "$.decision"
+        }
+      },
+      "TimeoutSeconds": 3600,
+      "ResultPath": "$.approval",
+      "Next": "WriteMemory",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.Timeout"],
+          "ResultPath": "$.error",
+          "Next": "ApprovalTimeout"
+        }
+      ]
+    },
+    "ApprovalTimeout": {
+      "Type": "Pass",
+      "Result": {
+        "status": "approval_timeout",
+        "message": "Human approval not received within 1 hour"
+      },
+      "ResultPath": "$.approval",
+      "Next": "WriteMemory"
+    },
+    "WriteMemory": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "sre-agent-write-memory-dev",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.memory_write",
+      "Next": "IncidentResolved",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "IncidentResolved"
+        }
+      ]
+    },
+    "IncidentResolved": {
+      "Type": "Succeed"
+    },
+    "IncidentFailed": {
+      "Type": "Fail",
+      "Error": "IncidentProcessingFailed",
+      "Cause": "An agent step failed during incident processing. Check CloudWatch logs for details."
+    }
+  }
+}

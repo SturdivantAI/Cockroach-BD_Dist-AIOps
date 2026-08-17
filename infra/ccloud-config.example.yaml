@@ -1,0 +1,44 @@
+# CockroachDB Cloud (ccloud) CLI Configuration
+# Copy this file to ~/.ccloud/config.yaml and update values
+
+# Cluster configuration for the SRE Memory Agent
+cluster:
+  name: sre-memory-agent
+  cloud: AWS
+  regions:
+    - us-east-1  # Primary region
+    - us-east-2  # Secondary region
+    - us-west-2  # Tertiary region (cross-continent for max resilience)
+  plan: STANDARD  # Standard required for multi-region
+  survival_goal: REGION  # Survives entire region failure (requires 3+ regions)
+
+# Service accounts (created by provision-cluster script)
+service_accounts:
+  agent_read:
+    name: sre-agent-read
+    description: "Read-only access for retrieval agent (vectors + memory)"
+    permissions:
+      - SELECT on incidents
+      - SELECT on incident_embeddings
+      - SELECT on agent_memory
+      - SELECT on agent_decisions
+
+  agent_write:
+    name: sre-agent-write
+    description: "Write access for decision/memory agents"
+    permissions:
+      - INSERT on agent_memory
+      - INSERT on agent_decisions
+      - UPDATE on incidents (resolved_at, resolution)
+      - INSERT on incident_embeddings
+
+# Backup schedule (demonstrated via ccloud CLI)
+backup:
+  schedule: "0 2 * * *"  # Daily at 2 AM UTC
+  retention_days: 7
+
+# Audit logging
+audit:
+  enabled: true
+  log_level: ALL
+  export_format: JSON

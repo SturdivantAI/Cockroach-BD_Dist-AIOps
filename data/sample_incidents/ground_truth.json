@@ -1,0 +1,420 @@
+{
+  "version": "1.0.0",
+  "description": "Ground truth dataset for LLM-as-Judge evaluation. Each incident class has 3 variants paired for memory improvement testing.",
+  "incident_classes": [
+    {
+      "class_id": "cpu_spike",
+      "class_name": "CPU Spike",
+      "root_cause_pattern": "Computational resource exhaustion from unbounded/inefficient processing",
+      "resolution_pattern": "Identify and bound the runaway computation, deploy fix, add guards",
+      "variants": [
+        {
+          "variant_id": "cpu_spike_v1",
+          "pair_role": "first_encounter",
+          "pair_with": "cpu_spike_v2",
+          "alert": {
+            "alert_id": "eval-cpu-001",
+            "service": "inventory-service",
+            "severity": "critical",
+            "description": "Inventory service CPU at 94% sustained. Stock level calculations hanging.",
+            "timestamp": "2026-07-20T10:15:00Z"
+          },
+          "logs": [
+            "2026-07-20T10:15:00Z [inventory-service] WARN cpu_usage=94.1% threshold=85%",
+            "2026-07-20T10:15:05Z [inventory-service] ERROR request_timeout path=/api/stock/recalculate latency=8500ms",
+            "2026-07-20T10:15:10Z [inventory-service] WARN gc_pressure=high heap_used=3.8GB/4GB",
+            "2026-07-20T10:15:15Z [inventory-service] ERROR deadlock_detected thread=stock-calc-worker-12",
+            "2026-07-20T10:15:20Z [inventory-service] WARN active_threads=500 max=500 queued=2340"
+          ],
+          "ground_truth": {
+            "root_cause": "Recursive stock aggregation query with no depth limit triggered by circular warehouse dependency in configuration",
+            "resolution": "Added max recursion depth of 10 to stock aggregation. Fixed circular dependency in warehouse config. Restarted service.",
+            "category": "unbounded_recursion",
+            "time_to_resolve_minutes": 45
+          }
+        },
+        {
+          "variant_id": "cpu_spike_v2",
+          "pair_role": "memory_assisted",
+          "pair_with": "cpu_spike_v1",
+          "alert": {
+            "alert_id": "eval-cpu-002",
+            "service": "pricing-engine",
+            "severity": "critical",
+            "description": "Pricing engine CPU at 91% sustained. Dynamic pricing calculations unresponsive.",
+            "timestamp": "2026-07-21T14:30:00Z"
+          },
+          "logs": [
+            "2026-07-21T14:30:00Z [pricing-engine] WARN cpu_usage=91.3% threshold=85%",
+            "2026-07-21T14:30:05Z [pricing-engine] ERROR request_timeout path=/api/price/compute latency=12000ms",
+            "2026-07-21T14:30:10Z [pricing-engine] WARN recursive_calls=depth_unknown function=compute_bundle_price",
+            "2026-07-21T14:30:15Z [pricing-engine] ERROR stack_overflow thread=pricing-worker-8",
+            "2026-07-21T14:30:20Z [pricing-engine] WARN active_threads=200 max=200 queued=5100"
+          ],
+          "ground_truth": {
+            "root_cause": "Recursive bundle pricing calculation with no depth limit triggered by circular product bundle reference",
+            "resolution": "Added max recursion depth of 5 to bundle pricing. Fixed circular bundle reference in product catalog. Restarted service.",
+            "category": "unbounded_recursion",
+            "time_to_resolve_minutes": 20
+          }
+        },
+        {
+          "variant_id": "cpu_spike_v3",
+          "pair_role": "first_encounter",
+          "pair_with": null,
+          "alert": {
+            "alert_id": "eval-cpu-003",
+            "service": "report-generator",
+            "severity": "high",
+            "description": "Report generator CPU at 88%. Monthly report generation consuming all available compute.",
+            "timestamp": "2026-07-22T03:00:00Z"
+          },
+          "logs": [
+            "2026-07-22T03:00:00Z [report-generator] WARN cpu_usage=88.5% during=monthly_batch",
+            "2026-07-22T03:00:10Z [report-generator] INFO parallel_reports=50 max_recommended=10",
+            "2026-07-22T03:00:20Z [report-generator] WARN pdf_render_memory=12GB growing=true",
+            "2026-07-22T03:00:30Z [report-generator] ERROR timeout report_id=rpt-4521 after=300s"
+          ],
+          "ground_truth": {
+            "root_cause": "Monthly batch spawned 50 parallel PDF renders without concurrency limit, each holding large data in memory",
+            "resolution": "Added semaphore limiting concurrent renders to 10. Implemented streaming PDF generation to reduce per-report memory. Staggered batch start times.",
+            "category": "unbounded_concurrency",
+            "time_to_resolve_minutes": 35
+          }
+        }
+      ]
+    },
+    {
+      "class_id": "memory_leak",
+      "class_name": "Memory Leak",
+      "root_cause_pattern": "Resource retention without proper cleanup or bounded lifecycle",
+      "resolution_pattern": "Add TTL/bounds to resource pools, fix reference retention, add monitoring",
+      "variants": [
+        {
+          "variant_id": "memory_leak_v1",
+          "pair_role": "first_encounter",
+          "pair_with": "memory_leak_v2",
+          "alert": {
+            "alert_id": "eval-mem-001",
+            "service": "websocket-gateway",
+            "severity": "critical",
+            "description": "WebSocket gateway memory at 92% and growing. Connected clients experiencing disconnects.",
+            "timestamp": "2026-07-20T18:00:00Z"
+          },
+          "logs": [
+            "2026-07-20T18:00:00Z [ws-gateway] WARN memory_rss=7.4GB limit=8GB growth=100MB/hr",
+            "2026-07-20T18:00:05Z [ws-gateway] INFO active_connections=45000 tracked_sessions=120000",
+            "2026-07-20T18:00:10Z [ws-gateway] WARN stale_sessions=75000 last_activity>1hr",
+            "2026-07-20T18:00:15Z [ws-gateway] ERROR forced_disconnect count=500 reason=memory_pressure"
+          ],
+          "ground_truth": {
+            "root_cause": "WebSocket session objects retained in memory after client disconnect. Cleanup callback not firing on abnormal close.",
+            "resolution": "Fixed disconnect handler to cover all close codes. Added periodic sweep (every 60s) to remove sessions idle >5min. Set max session lifetime of 24hr.",
+            "category": "stale_resource_retention",
+            "time_to_resolve_minutes": 60
+          }
+        },
+        {
+          "variant_id": "memory_leak_v2",
+          "pair_role": "memory_assisted",
+          "pair_with": "memory_leak_v1",
+          "alert": {
+            "alert_id": "eval-mem-002",
+            "service": "sse-service",
+            "severity": "critical",
+            "description": "Server-Sent Events service memory at 89%. Event subscribers not being cleaned up.",
+            "timestamp": "2026-07-21T22:30:00Z"
+          },
+          "logs": [
+            "2026-07-21T22:30:00Z [sse-service] WARN memory_rss=3.6GB limit=4GB growth=80MB/hr",
+            "2026-07-21T22:30:05Z [sse-service] INFO active_subscribers=8000 registered_channels=35000",
+            "2026-07-21T22:30:10Z [sse-service] WARN orphaned_channels=27000 no_active_subscriber",
+            "2026-07-21T22:30:15Z [sse-service] ERROR new_subscription_rejected reason=memory_limit"
+          ],
+          "ground_truth": {
+            "root_cause": "SSE channel objects not removed when subscriber disconnects. Unsubscribe event not propagated on network timeout.",
+            "resolution": "Added heartbeat-based liveness check every 30s. Channels with no active subscriber for >2min are reaped. Set max channels per service to 10000.",
+            "category": "stale_resource_retention",
+            "time_to_resolve_minutes": 25
+          }
+        },
+        {
+          "variant_id": "memory_leak_v3",
+          "pair_role": "first_encounter",
+          "pair_with": null,
+          "alert": {
+            "alert_id": "eval-mem-003",
+            "service": "file-processor",
+            "severity": "high",
+            "description": "File processor memory growing steadily. Large file handles not being released after processing.",
+            "timestamp": "2026-07-22T09:00:00Z"
+          },
+          "logs": [
+            "2026-07-22T09:00:00Z [file-processor] WARN memory_rss=5.2GB baseline=1.5GB uptime=48hr",
+            "2026-07-22T09:00:05Z [file-processor] INFO open_file_handles=3400 expected_max=50",
+            "2026-07-22T09:00:10Z [file-processor] WARN temp_files_on_disk=3400 total_size=45GB",
+            "2026-07-22T09:00:15Z [file-processor] ERROR too_many_open_files errno=EMFILE"
+          ],
+          "ground_truth": {
+            "root_cause": "File processing pipeline not closing file handles in error path. When processing fails, temp files and handles leak.",
+            "resolution": "Wrapped file operations in try/finally to guarantee handle closure. Added temp file cleanup on error. Implemented file handle pool with max 100 concurrent.",
+            "category": "resource_leak_on_error_path",
+            "time_to_resolve_minutes": 40
+          }
+        }
+      ]
+    },
+    {
+      "class_id": "network_partition",
+      "class_name": "Network Partition",
+      "root_cause_pattern": "Connectivity loss between components causing split-brain or unavailability",
+      "resolution_pattern": "Restore connectivity, verify data consistency, add partition detection",
+      "variants": [
+        {
+          "variant_id": "network_partition_v1",
+          "pair_role": "first_encounter",
+          "pair_with": "network_partition_v2",
+          "alert": {
+            "alert_id": "eval-net-001",
+            "service": "distributed-lock-service",
+            "severity": "critical",
+            "description": "Distributed lock service split. Two leaders elected simultaneously across partitions.",
+            "timestamp": "2026-07-20T04:00:00Z"
+          },
+          "logs": [
+            "2026-07-20T04:00:00Z [lock-svc-node-1] WARN leader_heartbeat_missed peer=node-4 timeout=10s",
+            "2026-07-20T04:00:05Z [lock-svc-node-4] INFO self_promoted_leader partition=B quorum=2/3",
+            "2026-07-20T04:00:10Z [lock-svc-node-1] INFO still_leader partition=A quorum=2/3",
+            "2026-07-20T04:00:15Z [app-client] ERROR conflicting_locks resource=order-123 holders=2"
+          ],
+          "ground_truth": {
+            "root_cause": "Security group update dropped traffic between subnet-A and subnet-B. Leader election quorum too low (2/3 instead of 3/5).",
+            "resolution": "Reverted security group change. Increased quorum requirement to 3/5. Added fencing token to prevent stale leader actions. Reconciled conflicting locks.",
+            "category": "split_brain_from_config_change",
+            "time_to_resolve_minutes": 55
+          }
+        },
+        {
+          "variant_id": "network_partition_v2",
+          "pair_role": "memory_assisted",
+          "pair_with": "network_partition_v1",
+          "alert": {
+            "alert_id": "eval-net-002",
+            "service": "config-service",
+            "severity": "critical",
+            "description": "Config service cluster partitioned. Different nodes serving different config versions.",
+            "timestamp": "2026-07-21T06:15:00Z"
+          },
+          "logs": [
+            "2026-07-21T06:15:00Z [config-svc-node-2] WARN peer_unreachable peer=node-5 timeout=15s",
+            "2026-07-21T06:15:05Z [config-svc-node-5] INFO serving_version=v42 partition=B",
+            "2026-07-21T06:15:10Z [config-svc-node-2] INFO serving_version=v41 partition=A",
+            "2026-07-21T06:15:15Z [app-service] ERROR config_inconsistency key=feature_flags values=[v41,v42]"
+          ],
+          "ground_truth": {
+            "root_cause": "Firewall rule update blocked internal cluster traffic between config service nodes in different AZs.",
+            "resolution": "Reverted firewall rule change. Added change validation for internal cluster ports. Forced config re-sync from primary. Added version consistency health check.",
+            "category": "split_brain_from_config_change",
+            "time_to_resolve_minutes": 25
+          }
+        },
+        {
+          "variant_id": "network_partition_v3",
+          "pair_role": "first_encounter",
+          "pair_with": null,
+          "alert": {
+            "alert_id": "eval-net-003",
+            "service": "queue-cluster",
+            "severity": "high",
+            "description": "Message queue cluster experiencing intermittent connectivity. Messages being duplicated.",
+            "timestamp": "2026-07-22T13:45:00Z"
+          },
+          "logs": [
+            "2026-07-22T13:45:00Z [rabbitmq-node-1] WARN network_partition_detected peer=node-3",
+            "2026-07-22T13:45:05Z [rabbitmq-node-3] INFO queue_mirroring_paused partition_mode=autoheal",
+            "2026-07-22T13:45:10Z [consumer-app] WARN duplicate_message_detected msg_id=msg-7892 count=3",
+            "2026-07-22T13:45:15Z [rabbitmq-node-1] INFO partition_healed resync_queues=12"
+          ],
+          "ground_truth": {
+            "root_cause": "Intermittent MTU mismatch on new VXLAN overlay network causing large packets to be dropped between queue nodes",
+            "resolution": "Configured consistent MTU 1400 across VXLAN overlay. Enabled TCP MSS clamping. Added idempotency keys to consumers to handle duplicate messages.",
+            "category": "network_misconfiguration",
+            "time_to_resolve_minutes": 50
+          }
+        }
+      ]
+    },
+    {
+      "class_id": "disk_io_saturation",
+      "class_name": "Disk I/O Saturation",
+      "root_cause_pattern": "Storage bandwidth exhaustion from unbounded writes or competing workloads",
+      "resolution_pattern": "Identify and throttle the I/O source, separate workloads, upgrade storage tier",
+      "variants": [
+        {
+          "variant_id": "disk_io_v1",
+          "pair_role": "first_encounter",
+          "pair_with": "disk_io_v2",
+          "alert": {
+            "alert_id": "eval-disk-001",
+            "service": "timeseries-db",
+            "severity": "critical",
+            "description": "TimeSeries DB write latency 100x normal. Compaction unable to keep up with ingest rate.",
+            "timestamp": "2026-07-20T07:30:00Z"
+          },
+          "logs": [
+            "2026-07-20T07:30:00Z [tsdb] WARN write_latency_p99=5000ms baseline=50ms",
+            "2026-07-20T07:30:05Z [tsdb] ERROR compaction_backlog=450GB pending_compactions=89",
+            "2026-07-20T07:30:10Z [tsdb] WARN disk_iops=50000 limit=50000 util=100%",
+            "2026-07-20T07:30:15Z [tsdb] ERROR write_stall duration=12s reason=L0_file_count_exceeded"
+          ],
+          "ground_truth": {
+            "root_cause": "New metrics collection agent deployed across fleet doubled ingest rate without pre-provisioned compaction capacity",
+            "resolution": "Temporarily throttled new metrics agent to 50% rate. Increased compaction concurrency from 4 to 8. Upgraded to io2 Block Express volumes. Gradually restored full ingest.",
+            "category": "ingest_exceeds_compaction",
+            "time_to_resolve_minutes": 70
+          }
+        },
+        {
+          "variant_id": "disk_io_v2",
+          "pair_role": "memory_assisted",
+          "pair_with": "disk_io_v1",
+          "alert": {
+            "alert_id": "eval-disk-002",
+            "service": "audit-log-store",
+            "severity": "critical",
+            "description": "Audit log store write latency spiked. Compliance logs being buffered and at risk of loss.",
+            "timestamp": "2026-07-21T11:00:00Z"
+          },
+          "logs": [
+            "2026-07-21T11:00:00Z [audit-store] WARN write_latency_p99=3500ms baseline=30ms",
+            "2026-07-21T11:00:05Z [audit-store] ERROR sstable_compaction_behind pending=67 ratio=5.2",
+            "2026-07-21T11:00:10Z [audit-store] WARN disk_throughput=1.8GB/s limit=2GB/s util=90%",
+            "2026-07-21T11:00:15Z [audit-store] ERROR write_buffer_full dropping_oldest=true"
+          ],
+          "ground_truth": {
+            "root_cause": "Compliance audit expansion tripled write volume overnight without corresponding storage capacity increase",
+            "resolution": "Increased compaction threads from 2 to 6. Added write rate limiter with backpressure signal to producers. Upgraded storage to provisioned IOPS. Phased audit expansion.",
+            "category": "ingest_exceeds_compaction",
+            "time_to_resolve_minutes": 30
+          }
+        },
+        {
+          "variant_id": "disk_io_v3",
+          "pair_role": "first_encounter",
+          "pair_with": null,
+          "alert": {
+            "alert_id": "eval-disk-003",
+            "service": "object-store-proxy",
+            "severity": "high",
+            "description": "Object store proxy disk I/O saturated from cache warming after restart.",
+            "timestamp": "2026-07-22T02:00:00Z"
+          },
+          "logs": [
+            "2026-07-22T02:00:00Z [obj-proxy] INFO cache_cold started_warming=true total_objects=2M",
+            "2026-07-22T02:00:10Z [obj-proxy] WARN disk_io=100% cache_write_rate=500MB/s",
+            "2026-07-22T02:00:20Z [obj-proxy] ERROR read_latency=800ms cache_miss_rate=95%",
+            "2026-07-22T02:00:30Z [obj-proxy] WARN client_timeout_rate=30% affected_paths=/images/*"
+          ],
+          "ground_truth": {
+            "root_cause": "Cache warming strategy attempts to preload all 2M objects simultaneously after pod restart, saturating disk",
+            "resolution": "Implemented gradual cache warming (1000 objects/s). Added priority-based warming (hot objects first via access frequency). Served requests with origin fallback during warm-up.",
+            "category": "aggressive_cache_warming",
+            "time_to_resolve_minutes": 45
+          }
+        }
+      ]
+    },
+    {
+      "class_id": "cascading_failure",
+      "class_name": "Cascading Service Failure",
+      "root_cause_pattern": "Single component failure propagating through dependency chain due to missing isolation",
+      "resolution_pattern": "Isolate failure domain, add circuit breakers, implement graceful degradation",
+      "variants": [
+        {
+          "variant_id": "cascade_v1",
+          "pair_role": "first_encounter",
+          "pair_with": "cascade_v2",
+          "alert": {
+            "alert_id": "eval-cascade-001",
+            "service": "booking-platform",
+            "severity": "critical",
+            "description": "Booking platform cascade: availability check timeout caused search failures, which overwhelmed fallback service.",
+            "timestamp": "2026-07-20T16:00:00Z"
+          },
+          "logs": [
+            "2026-07-20T16:00:00Z [availability-svc] ERROR database_timeout query_time=30s limit=5s",
+            "2026-07-20T16:00:05Z [search-svc] ERROR availability_check_failed upstream_timeout=30s",
+            "2026-07-20T16:00:10Z [search-svc] WARN fallback_to=cached_availability stale_data=true",
+            "2026-07-20T16:00:15Z [fallback-svc] ERROR request_flood rate=15000/s capacity=2000/s",
+            "2026-07-20T16:00:20Z [api-gateway] ERROR 503_rate=72% all_booking_paths_affected"
+          ],
+          "ground_truth": {
+            "root_cause": "Slow database query in availability service (missing index) caused timeout cascade. Fallback service not provisioned for full traffic load.",
+            "resolution": "Added missing index on availability table. Set aggressive timeout (2s) on availability calls. Provisioned fallback service to handle 100% traffic. Added circuit breaker with 50% error threshold.",
+            "category": "timeout_cascade_no_circuit_breaker",
+            "time_to_resolve_minutes": 65
+          }
+        },
+        {
+          "variant_id": "cascade_v2",
+          "pair_role": "memory_assisted",
+          "pair_with": "cascade_v1",
+          "alert": {
+            "alert_id": "eval-cascade-002",
+            "service": "shipping-platform",
+            "severity": "critical",
+            "description": "Shipping platform cascade: rate calculator timeout caused order completion failures, backing up the entire fulfillment queue.",
+            "timestamp": "2026-07-21T19:00:00Z"
+          },
+          "logs": [
+            "2026-07-21T19:00:00Z [rate-calculator] ERROR external_api_timeout provider=carrier-x latency=45s",
+            "2026-07-21T19:00:05Z [order-completion] ERROR shipping_rate_unavailable timeout=45s",
+            "2026-07-21T19:00:10Z [order-completion] WARN retry_queue_depth=25000 growing=500/s",
+            "2026-07-21T19:00:15Z [fulfillment-queue] ERROR queue_full max=50000 current=49800",
+            "2026-07-21T19:00:20Z [api-gateway] ERROR 503_rate=58% path=/api/orders/complete"
+          ],
+          "ground_truth": {
+            "root_cause": "External carrier API timeout (provider outage) caused request pile-up. No circuit breaker or timeout cap on rate calculation. Fulfillment queue not bounded.",
+            "resolution": "Added 3s timeout on carrier API calls. Implemented circuit breaker (opens after 5 failures in 10s). Added cached rates as fallback. Set fulfillment queue max with backpressure.",
+            "category": "timeout_cascade_no_circuit_breaker",
+            "time_to_resolve_minutes": 25
+          }
+        },
+        {
+          "variant_id": "cascade_v3",
+          "pair_role": "first_encounter",
+          "pair_with": null,
+          "alert": {
+            "alert_id": "eval-cascade-003",
+            "service": "media-pipeline",
+            "severity": "high",
+            "description": "Media pipeline cascade: transcoding service OOM caused upload failures, which filled local disk on ingest service.",
+            "timestamp": "2026-07-22T20:30:00Z"
+          },
+          "logs": [
+            "2026-07-22T20:30:00Z [transcoder] ERROR oom_killed processing=4k_video memory=16GB/16GB",
+            "2026-07-22T20:30:05Z [upload-svc] ERROR transcode_unavailable retrying=true",
+            "2026-07-22T20:30:10Z [upload-svc] WARN local_buffer_disk_usage=95% buffered_uploads=2300",
+            "2026-07-22T20:30:15Z [ingest-svc] ERROR disk_full cannot_accept_uploads",
+            "2026-07-22T20:30:20Z [cdn] WARN stale_content serving_cached=true freshness=expired"
+          ],
+          "ground_truth": {
+            "root_cause": "4K video transcoding request exceeded memory limit. Upload service buffers locally without limit when transcoder unavailable. Fills disk on ingest service.",
+            "resolution": "Added memory limit per transcode job (4GB max, reject larger). Bounded local upload buffer to 10GB with rejection when full. Added async processing queue between upload and transcode.",
+            "category": "resource_exhaustion_cascade",
+            "time_to_resolve_minutes": 50
+          }
+        }
+      ]
+    }
+  ],
+  "evaluation_metadata": {
+    "total_incident_classes": 5,
+    "total_variants": 15,
+    "paired_scenarios": 5,
+    "unpaired_scenarios": 5,
+    "scoring_dimensions": ["accuracy", "resolution", "reasoning", "evidence"],
+    "scoring_scale": "1-5 per dimension",
+    "expected_improvement": "memory_assisted variants should score >= 0.5 higher than first_encounter on same class"
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "type": "object",
+  "required": ["version", "description", "incident_classes", "evaluation_metadata"],
+  "properties": {
+    "version": { "type": "string" },
+    "description": { "type": "string" },
+    "incident_classes": {
+      "type": "array",
+      "minItems": 5,
+      "items": {
+        "type": "object",
+        "required": ["class_id", "class_name", "root_cause_pattern", "resolution_pattern", "variants"],
+        "properties": {
+          "class_id": { "type": "string" },
+          "class_name": { "type": "string" },
+          "root_cause_pattern": { "type": "string" },
+          "resolution_pattern": { "type": "string" },
+          "variants": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "required": ["variant_id", "pair_role", "alert", "logs", "ground_truth"],
+              "properties": {
+                "variant_id": { "type": "string" },
+                "pair_role": { "type": "string", "enum": ["first_encounter", "memory_assisted"] },
+                "pair_with": { "type": ["string", "null"] },
+                "alert": {
+                  "type": "object",
+                  "required": ["alert_id", "service", "severity", "description", "timestamp"],
+                  "properties": {
+                    "alert_id": { "type": "string" },
+                    "service": { "type": "string" },
+                    "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+                    "description": { "type": "string" },
+                    "timestamp": { "type": "string", "format": "date-time" }
+                  }
+                },
+                "logs": {
+                  "type": "array",
+                  "minItems": 3,
+                  "items": { "type": "string" }
+                },
+                "ground_truth": {
+                  "type": "object",
+                  "required": ["root_cause", "resolution", "category", "time_to_resolve_minutes"],
+                  "properties": {
+                    "root_cause": { "type": "string" },
+                    "resolution": { "type": "string" },
+                    "category": { "type": "string" },
+                    "time_to_resolve_minutes": { "type": "integer", "minimum": 1 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "evaluation_metadata": {
+      "type": "object",
+      "required": ["total_incident_classes", "total_variants", "paired_scenarios"],
+      "properties": {
+        "total_incident_classes": { "type": "integer" },
+        "total_variants": { "type": "integer" },
+        "paired_scenarios": { "type": "integer" },
+        "unpaired_scenarios": { "type": "integer" },
+        "scoring_dimensions": { "type": "array", "items": { "type": "string" } },
+        "scoring_scale": { "type": "string" },
+        "expected_improvement": { "type": "string" }
+      }
+    }
+  }
+}

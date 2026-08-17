@@ -1,0 +1,16 @@
+# SAM CLI configuration for SRE Memory Agent
+# More information: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-config.html
+
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "sre-memory-agent-dev"
+resolve_s3 = true
+s3_prefix = "sre-memory-agent"
+region = "us-east-1"
+capabilities = "CAPABILITY_NAMED_IAM"
+confirm_changeset = true
+parameter_overrides = "Environment=\"dev\" S3BucketName=\"sre-memory-agent-artifacts\""
+
+[default.build.parameters]
+use_container = false
