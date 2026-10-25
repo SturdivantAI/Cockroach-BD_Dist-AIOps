@@ -1,0 +1,13 @@
+﻿channel,item_id,verdict,reason,verification_id,evidence_scope
+incident,7b585d61-43ca-48fc-b919-16de059a0cc3,withhold,no_matching_verification,,
+incident,53000d85-076d-4408-aff7-fd88ffb01f1b,withhold,no_matching_verification,,
+incident,3b308652-35c9-4924-a03f-3b839678e708,withhold,no_matching_verification,,
+incident,8ead9010-31f0-4475-bf40-97ab25a01f38,withhold,no_matching_verification,,
+incident,48a612e3-f847-40a6-8214-f8157fa43b6d,withhold,no_matching_verification,,
+prior_agent,b1605a16-7f97-4764-aae1-f6d6fe92b206,withhold,simulation_evidence_not_enabled,,
+prior_agent,054a7a6a-594b-4e6f-a093-753b0f3c4ce6,withhold,simulation_evidence_not_enabled,,
+prior_agent,6680442e-98e8-402a-ac9d-90e409cfddf2,withhold,simulation_evidence_not_enabled,,
+prior_agent,e877d775-3b7c-4de1-ba80-d94e325cce5b,withhold,simulation_evidence_not_enabled,,
+prior_agent,9adba128-511a-46a1-a101-103b9e6466a9,withhold,simulation_evidence_not_enabled,,
+prior_agent,53c1a7c8-e65d-4daa-a53e-2f1f581cf713,withhold,simulation_evidence_not_enabled,,
+prior_agent,dde655bf-8131-499e-97d3-96732adbed2a,withhold,simulation_evidence_not_enabled,,

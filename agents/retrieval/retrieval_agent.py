@@ -1,4 +1,4 @@
-"""Retrieval Agent - Queries CockroachDB for similar past incidents via vector search.
+"""Retrieve distinct incidents and validate incident and prior-agent memory.
 
 This agent:
 1. Takes an alert payload as input
@@ -7,7 +7,7 @@ This agent:
 4. Queries agent_memory for prior reasoning about this service/alert type
 5. Returns structured context for the Analysis Agent
 
-Uses CockroachDB Distributed Vector Indexing (hackathon requirement).
+The PostgreSQL pilot uses exact cosine search and ledger-backed validation.
 """
 
 import json
@@ -33,12 +33,16 @@ class RetrievalResult:
         confidence: float,
         memory_available: bool,
         query_embedding: list[float] | None = None,
+        validation_report: list[dict[str, Any]] | None = None,
+        validation_enabled: bool = True,
     ):
         self.similar_incidents = similar_incidents
         self.prior_reasoning = prior_reasoning
         self.confidence = confidence
         self.memory_available = memory_available
         self.query_embedding = query_embedding
+        self.validation_report = validation_report or []
+        self.validation_enabled = validation_enabled
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for Step Functions payload."""
@@ -49,6 +53,8 @@ class RetrievalResult:
             "memory_available": self.memory_available,
             "num_similar": len(self.similar_incidents),
             "num_prior_reasoning": len(self.prior_reasoning),
+            "validation_enabled": self.validation_enabled,
+            "validation_report": self.validation_report,
         }
 
 
@@ -75,10 +81,9 @@ def _vector_search(
     top_k: int = 5,
     exclude_incident_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Query CockroachDB Distributed Vector Index for similar incidents.
-
-    Uses cosine similarity via the vector_cosine index.
-    """
+    """Rank distinct incidents by their closest embedding's cosine distance."""
+    if top_k < 1:
+        raise ValueError("top_k must be positive")
     vec_str = "[" + ",".join(str(v) for v in embedding) + "]"
 
     query = """
@@ -106,7 +111,13 @@ def _vector_search(
         query += " AND ie.incident_id != %s"
         params.append(exclude_incident_id)
 
-    query += " ORDER BY distance ASC LIMIT %s"
+    # Deduplicate before LIMIT: multiple chunks must not amplify one incident.
+    query = (
+        "SELECT * FROM (SELECT DISTINCT ON (incident_id) * FROM ("
+        + query
+        + ") AS candidates ORDER BY incident_id, distance ASC, embedding_type, chunk_text) "
+        "AS distinct_incidents ORDER BY distance ASC, incident_id LIMIT %s"
+    )
     params.append(top_k)
 
     results = execute_query(query, tuple(params))
@@ -124,6 +135,7 @@ def _vector_search(
             "resolution": row["resolution"],
             "incident_class": row["incident_class"],
             "embedding_type": row["embedding_type"],
+            "metadata": row["metadata"],
             "similarity_score": round(1.0 - float(row["distance"]), 4),
             "resolved_at": row["resolved_at"].isoformat() if row["resolved_at"] else None,
         })
@@ -157,7 +169,7 @@ def _query_prior_reasoning(
 
     query = f"""
         SELECT
-            id, session_id, agent_name, step_type, content, created_at
+            id, session_id, incident_id, agent_name, step_type, content, created_at
         FROM agent_memory
         WHERE ({where_clause})
           AND step_type IN ('outcome', 'hypothesis', 'action')
@@ -178,6 +190,7 @@ def _query_prior_reasoning(
         reasoning.append({
             "memory_id": str(row["id"]),
             "session_id": str(row["session_id"]),
+            "incident_id": str(row["incident_id"]) if row["incident_id"] else None,
             "agent_name": row["agent_name"],
             "step_type": row["step_type"],
             "content": content,
@@ -196,6 +209,8 @@ def _write_retrieval_to_memory(
     """Write retrieval step to agent_memory for future reference."""
     content = {
         "service": alert.get("service"),
+        "validation_enabled": result.validation_enabled,
+        "validation_report": result.validation_report,
         "alert_description": alert.get("description", "")[:200],
         "similar_count": len(result.similar_incidents),
         "memory_available": result.memory_available,
@@ -235,6 +250,7 @@ def run(
     session_id: str | None = None,
     incident_id: str | None = None,
     top_k: int | None = None,
+    validation_enabled: bool | None = None,
 ) -> RetrievalResult:
     """Execute the Retrieval Agent.
 
@@ -251,6 +267,8 @@ def run(
         session_id = str(uuid.uuid4())
     if top_k is None:
         top_k = settings.retrieval_top_k
+    if validation_enabled is None:
+        validation_enabled = settings.memory_validation_enabled
 
     logger.info(
         "Retrieval agent running for service=%s, session=%s",
@@ -271,6 +289,7 @@ def run(
             prior_reasoning=[],
             confidence=0.0,
             memory_available=False,
+            validation_enabled=validation_enabled,
         )
 
     # Step 2: Vector similarity search in CockroachDB
@@ -303,7 +322,30 @@ def run(
         incident_class=incident_class,
     )
 
-    # Step 4: Compute confidence based on retrieval quality
+    validation_report: list[dict[str, Any]] = []
+    if validation_enabled:
+        from agents.memory_validation import load_verifications, validate_context
+
+        ids = sorted({
+            str(item["incident_id"])
+            for item in similar_incidents + prior_reasoning if item.get("incident_id")
+        })
+        try:
+            receipts = load_verifications(ids)
+        except Exception as exc:
+            logger.error("Verification lookup failed (%s); withholding memory", type(exc).__name__)
+            receipts = []
+            validation_report.append({
+                "channel": "ledger", "verdict": "withhold", "reason": "verification_lookup_failed",
+            })
+        similar_incidents, prior_reasoning, decisions = validate_context(
+            alert, similar_incidents, prior_reasoning, receipts,
+            max_age_days=settings.memory_max_age_days,
+            allow_simulation=settings.memory_allow_simulation,
+        )
+        validation_report.extend(decisions)
+
+    # Step 4: Recompute availability and retrieval confidence after filtering.
     memory_available = len(similar_incidents) > 0 or len(prior_reasoning) > 0
 
     if similar_incidents:
@@ -319,6 +361,8 @@ def run(
         confidence=confidence,
         memory_available=memory_available,
         query_embedding=embedding,
+        validation_report=validation_report,
+        validation_enabled=validation_enabled,
     )
 
     # Step 5: Write retrieval observation to memory

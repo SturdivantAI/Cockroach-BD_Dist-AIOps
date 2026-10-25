@@ -12,6 +12,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from agents.config import settings
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -103,8 +105,8 @@ def ingest_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     except Exception as e:
         logger.error("Ingestion failed: %s", e)
-        incident_id = str(uuid.uuid4())  # Use placeholder for downstream steps
         _save_error_state(session_id, None, "ingestion", str(e))
+        raise RuntimeError("Incident ingestion failed; workflow stopped") from e
 
     return {
         "status": "ingested",
@@ -145,6 +147,7 @@ def retrieval_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             alert=alert,
             session_id=session_id,
             incident_id=incident_id,
+            validation_enabled=event.get("validation_enabled", settings.memory_validation_enabled),
         )
 
         elapsed_ms = int((time.time() - start_time) * 1000)
@@ -361,134 +364,49 @@ def _handle_approval_gate(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def write_memory_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """Write resolution back to CockroachDB agent memory.
+    """Record an unexecuted proposal without claiming incident recovery.
 
-    After incident resolution, writes a structured memory entry for future retrieval.
-    This is what enables the agent to perform better on the second encounter.
-
-    Args:
-        event: Full workflow state with resolution details.
-        context: Lambda context object.
-
-    Returns:
-        Confirmation of memory write with entry count.
+    Outcome verification and promotion are separate operations. Payload claims
+    of approval or success must never turn this handler into a promotion path.
     """
-    # Extract state from workflow
-    ingestion = event.get("ingestion", {})
-    if "Payload" in ingestion:
-        ingestion = ingestion["Payload"]
-    retrieval = event.get("retrieval", {})
-    if "Payload" in retrieval:
-        retrieval = retrieval["Payload"]
-    analysis = event.get("analysis", {})
-    if "Payload" in analysis:
-        analysis = analysis["Payload"]
     decision = event.get("decision", {})
     if "Payload" in decision:
         decision = decision["Payload"]
+    session_id = decision.get("session_id")
+    incident_id = decision.get("incident_id")
+    decision_id = decision.get("decision_id")
+    if decision.get("error") or not all((session_id, incident_id, decision_id)):
+        raise ValueError("Cannot record a proposal without a persisted decision")
 
-    session_id = decision.get("session_id") or analysis.get("session_id") or str(uuid.uuid4())
-    incident_id = decision.get("incident_id") or analysis.get("incident_id")
+    from agents.db import get_connection
 
-    logger.info("Writing resolution memory: session=%s, incident=%s", session_id, incident_id)
-
-    entries_created = 0
-
-    try:
-        from agents.db import execute_command
-        from agents.bedrock_client import bedrock
-
-        # Write the outcome to agent_memory
-        outcome_content = {
-            "incident_class": analysis.get("incident_class_guess", "unknown"),
-            "service": ingestion.get("service", "unknown"),
-            "symptoms_signature": ingestion.get("alert", {}).get("description", "")[:200],
-            "root_cause": analysis.get("hypothesis", ""),
-            "resolution": decision.get("action", ""),
-            "confidence_at_diagnosis": analysis.get("confidence", 0.0),
-            "action_type": decision.get("action_type", "unknown"),
-            "memory_assisted": retrieval.get("memory_available", False),
-            "similar_count": retrieval.get("num_similar", 0),
+    # Check ownership and insert atomically; do not trust caller-supplied action text.
+    with get_connection() as conn:
+        action_column = "proposed_action" if settings.db_backend == "rds_postgresql" else "resolution_applied"
+        row = conn.execute(
+            f"SELECT {action_column} AS proposed_action FROM agent_decisions "
+            "WHERE id = %s AND incident_id = %s AND session_id = %s",
+            (decision_id, incident_id, session_id),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Decision does not belong to this incident and session")
+        content = {
+            "decision_id": decision_id,
+            "proposed_action": row["proposed_action"],
+            "execution_status": "proposed",
+            "outcome_verified": False,
         }
-
-        execute_command(
-            """
-            INSERT INTO agent_memory (id, session_id, incident_id, agent_name, step_type, content)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """,
-            (
-                str(uuid.uuid4()),
-                session_id,
-                incident_id,
-                "decision",
-                "outcome",
-                json.dumps(outcome_content),
-            ),
+        conn.execute(
+            "INSERT INTO agent_memory "
+            "(id, session_id, incident_id, agent_name, step_type, content) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (str(uuid.uuid4()), session_id, incident_id, "decision", "action", json.dumps(content)),
         )
-        entries_created += 1
-
-        # Update the incident record with resolution
-        if incident_id:
-            execute_command(
-                """
-                UPDATE incidents
-                SET resolution = %s,
-                    root_cause = %s,
-                    incident_class = COALESCE(incident_class, %s),
-                    resolved_at = now()
-                WHERE id = %s
-                """,
-                (
-                    decision.get("action", ""),
-                    analysis.get("hypothesis", ""),
-                    analysis.get("incident_class_guess"),
-                    incident_id,
-                ),
-            )
-
-        # Generate and store resolution embedding for future retrieval
-        resolution_text = (
-            f"Resolution for {analysis.get('incident_class_guess', 'unknown')} "
-            f"in {ingestion.get('service', 'unknown')}: "
-            f"{decision.get('action', '')}"
-        )
-
-        try:
-            embedding = bedrock.generate_embedding(resolution_text)
-            vec_str = "[" + ",".join(str(v) for v in embedding) + "]"
-
-            execute_command(
-                """
-                INSERT INTO incident_embeddings (id, incident_id, embedding, chunk_text, metadata, embedding_type)
-                VALUES (%s, %s, %s::VECTOR(1024), %s, %s, %s)
-                """,
-                (
-                    str(uuid.uuid4()),
-                    incident_id,
-                    vec_str,
-                    resolution_text,
-                    json.dumps({
-                        "service": ingestion.get("service"),
-                        "incident_class": analysis.get("incident_class_guess"),
-                        "type": "resolution",
-                        "confidence": analysis.get("confidence", 0.0),
-                    }),
-                    "resolution",
-                ),
-            )
-            entries_created += 1
-        except Exception as e:
-            logger.warning("Failed to generate/store resolution embedding: %s", e)
-
-    except Exception as e:
-        logger.error("Write memory failed: %s", e)
-        _save_error_state(session_id, incident_id, "write_memory", str(e))
-
-    logger.info("Memory write complete: %d entries created", entries_created)
-
     return {
-        "status": "memory_written",
+        "status": "proposal_recorded",
         "session_id": session_id,
         "incident_id": incident_id,
-        "memory_entries_created": entries_created,
+        "decision_id": decision_id,
+        "outcome_verified": False,
+        "memory_entries_created": 1,
     }

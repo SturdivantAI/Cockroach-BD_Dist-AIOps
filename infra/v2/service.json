@@ -1,0 +1,648 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "SRE-Agent v2 Fargate demo with CloudFront HTTPS, restricted origin, and scoped database access",
+  "Parameters": {
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id"
+    },
+    "PublicSubnets": {
+      "Type": "List<AWS::EC2::Subnet::Id>"
+    },
+    "VpcCidr": {
+      "Type": "String"
+    },
+    "DatabaseSecurityGroupId": {
+      "Type": "AWS::EC2::SecurityGroup::Id"
+    },
+    "DatabaseHost": {
+      "Type": "String"
+    },
+    "ApplicationDatabaseSecretArn": {
+      "Type": "String"
+    },
+    "RuntimeSecretArn": {
+      "Type": "String"
+    },
+    "ImageUri": {
+      "Type": "String"
+    },
+    "CloudFrontPrefixListId": {
+      "Type": "String"
+    }
+  },
+  "Resources": {
+    "LoadBalancerSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "CloudFront origin traffic only",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "SourcePrefixListId": {
+              "Ref": "CloudFrontPrefixListId"
+            }
+          }
+        ],
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 8501,
+            "ToPort": 8501,
+            "CidrIp": {
+              "Ref": "VpcCidr"
+            }
+          }
+        ]
+      }
+    },
+    "ApplicationSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Streamlit from ALB only",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 8501,
+            "ToPort": 8501,
+            "SourceSecurityGroupId": {
+              "Ref": "LoadBalancerSecurityGroup"
+            }
+          }
+        ],
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 5432,
+            "ToPort": 5432,
+            "DestinationSecurityGroupId": {
+              "Ref": "DatabaseSecurityGroupId"
+            }
+          }
+        ]
+      }
+    },
+    "DatabaseApplicationIngress": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "DatabaseSecurityGroupId"
+        },
+        "IpProtocol": "tcp",
+        "FromPort": 5432,
+        "ToPort": 5432,
+        "SourceSecurityGroupId": {
+          "Ref": "ApplicationSecurityGroup"
+        },
+        "Description": "Scoped SRE-Agent deployment access"
+      }
+    },
+    "Cluster": {
+      "Type": "AWS::ECS::Cluster",
+      "Properties": {
+        "ClusterSettings": [
+          {
+            "Name": "containerInsights",
+            "Value": "disabled"
+          }
+        ]
+      }
+    },
+    "Logs": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "RetentionInDays": 14
+      }
+    },
+    "ExecutionRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+        ],
+        "Policies": [
+          {
+            "PolicyName": "RuntimeSecretInjection",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "secretsmanager:GetSecretValue"
+                  ],
+                  "Resource": {
+                    "Ref": "RuntimeSecretArn"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "ApplicationRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "ScopedInferenceAndDatabaseSecret",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "secretsmanager:GetSecretValue"
+                  ],
+                  "Resource": {
+                    "Ref": "ApplicationDatabaseSecretArn"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "bedrock:InvokeModel"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "Task": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "Properties": {
+        "RequiresCompatibilities": [
+          "FARGATE"
+        ],
+        "NetworkMode": "awsvpc",
+        "Cpu": "512",
+        "Memory": "2048",
+        "RuntimePlatform": {
+          "CpuArchitecture": "X86_64",
+          "OperatingSystemFamily": "LINUX"
+        },
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "ExecutionRole",
+            "Arn"
+          ]
+        },
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "ApplicationRole",
+            "Arn"
+          ]
+        },
+        "ContainerDefinitions": [
+          {
+            "Name": "app",
+            "Image": {
+              "Ref": "ImageUri"
+            },
+            "Essential": true,
+            "PortMappings": [
+              {
+                "ContainerPort": 8501,
+                "Protocol": "tcp"
+              }
+            ],
+            "Environment": [
+              {
+                "Name": "DEPLOYMENT_MODE",
+                "Value": "hosted"
+              },
+              {
+                "Name": "AWS_REGION",
+                "Value": {
+                  "Ref": "AWS::Region"
+                }
+              },
+              {
+                "Name": "DB_BACKEND",
+                "Value": "rds_postgresql"
+              },
+              {
+                "Name": "RDS_HOST",
+                "Value": {
+                  "Ref": "DatabaseHost"
+                }
+              },
+              {
+                "Name": "RDS_PORT",
+                "Value": "5432"
+              },
+              {
+                "Name": "RDS_DATABASE",
+                "Value": "sre_agent"
+              },
+              {
+                "Name": "RDS_SECRET_ARN",
+                "Value": {
+                  "Ref": "ApplicationDatabaseSecretArn"
+                }
+              },
+              {
+                "Name": "RDS_SSLROOTCERT",
+                "Value": "/app/certs/aws-rds-global.pem"
+              },
+              {
+                "Name": "INFERENCE_PROVIDER",
+                "Value": "nebius"
+              },
+              {
+                "Name": "NEBIUS_MODEL_ID",
+                "Value": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"
+              },
+              {
+                "Name": "MEMORY_VALIDATION_ENABLED",
+                "Value": "true"
+              },
+              {
+                "Name": "MEMORY_ALLOW_SIMULATION",
+                "Value": "false"
+              },
+              {
+                "Name": "STREAMLIT_BROWSER_GATHER_USAGE_STATS",
+                "Value": "false"
+              }
+            ],
+            "Secrets": [
+              {
+                "Name": "NEBIUS_API_KEY",
+                "ValueFrom": {
+                  "Fn::Sub": "${RuntimeSecretArn}:NEBIUS_API_KEY::"
+                }
+              },
+              {
+                "Name": "DEMO_ACCESS_CODE",
+                "ValueFrom": {
+                  "Fn::Sub": "${RuntimeSecretArn}:DEMO_ACCESS_CODE::"
+                }
+              }
+            ],
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "Logs"
+                },
+                "awslogs-region": {
+                  "Ref": "AWS::Region"
+                },
+                "awslogs-stream-prefix": "app"
+              }
+            },
+            "HealthCheck": {
+              "Command": [
+                "CMD",
+                "python",
+                "-c",
+                "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=4).read()"
+              ],
+              "Interval": 30,
+              "Timeout": 5,
+              "Retries": 3,
+              "StartPeriod": 30
+            }
+          }
+        ]
+      }
+    },
+    "LoadBalancer": {
+      "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+      "Properties": {
+        "Scheme": "internet-facing",
+        "Type": "application",
+        "Subnets": {
+          "Ref": "PublicSubnets"
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "LoadBalancerSecurityGroup"
+          }
+        ],
+        "LoadBalancerAttributes": [
+          {
+            "Key": "idle_timeout.timeout_seconds",
+            "Value": "120"
+          }
+        ]
+      }
+    },
+    "TargetGroup": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "Port": 8501,
+        "Protocol": "HTTP",
+        "TargetType": "ip",
+        "HealthCheckPath": "/_stcore/health",
+        "HealthCheckIntervalSeconds": 15,
+        "HealthyThresholdCount": 2,
+        "UnhealthyThresholdCount": 3,
+        "Matcher": {
+          "HttpCode": "200"
+        },
+        "TargetGroupAttributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "30"
+          }
+        ]
+      }
+    },
+    "Listener": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "Properties": {
+        "LoadBalancerArn": {
+          "Ref": "LoadBalancer"
+        },
+        "Port": 80,
+        "Protocol": "HTTP",
+        "DefaultActions": [
+          {
+            "Type": "fixed-response",
+            "FixedResponseConfig": {
+              "StatusCode": "403",
+              "ContentType": "text/plain",
+              "MessageBody": "Origin access denied"
+            }
+          }
+        ]
+      }
+    },
+    "OriginRule": {
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "Properties": {
+        "ListenerArn": {
+          "Ref": "Listener"
+        },
+        "Priority": 1,
+        "Conditions": [
+          {
+            "Field": "http-header",
+            "HttpHeaderConfig": {
+              "HttpHeaderName": "X-SRE-Origin",
+              "Values": [
+                {
+                  "Fn::Sub": "{{resolve:secretsmanager:${RuntimeSecretArn}:SecretString:ORIGIN_TOKEN}}"
+                }
+              ]
+            }
+          }
+        ],
+        "Actions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "TargetGroup"
+            }
+          }
+        ]
+      }
+    },
+    "Service": {
+      "Type": "AWS::ECS::Service",
+      "DependsOn": [
+        "OriginRule",
+        "DatabaseApplicationIngress"
+      ],
+      "Properties": {
+        "Cluster": {
+          "Ref": "Cluster"
+        },
+        "TaskDefinition": {
+          "Ref": "Task"
+        },
+        "LaunchType": "FARGATE",
+        "PlatformVersion": "LATEST",
+        "DesiredCount": 1,
+        "HealthCheckGracePeriodSeconds": 60,
+        "DeploymentConfiguration": {
+          "MinimumHealthyPercent": 100,
+          "MaximumPercent": 200,
+          "DeploymentCircuitBreaker": {
+            "Enable": true,
+            "Rollback": true
+          }
+        },
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "AssignPublicIp": "ENABLED",
+            "Subnets": {
+              "Ref": "PublicSubnets"
+            },
+            "SecurityGroups": [
+              {
+                "Ref": "ApplicationSecurityGroup"
+              }
+            ]
+          }
+        },
+        "LoadBalancers": [
+          {
+            "ContainerName": "app",
+            "ContainerPort": 8501,
+            "TargetGroupArn": {
+              "Ref": "TargetGroup"
+            }
+          }
+        ]
+      }
+    },
+    "ResponseHeaders": {
+      "Type": "AWS::CloudFront::ResponseHeadersPolicy",
+      "Properties": {
+        "ResponseHeadersPolicyConfig": {
+          "Name": {
+            "Fn::Sub": "${AWS::StackName}-headers"
+          },
+          "SecurityHeadersConfig": {
+            "ContentTypeOptions": {
+              "Override": true
+            },
+            "FrameOptions": {
+              "FrameOption": "SAMEORIGIN",
+              "Override": true
+            },
+            "ReferrerPolicy": {
+              "ReferrerPolicy": "strict-origin-when-cross-origin",
+              "Override": true
+            },
+            "StrictTransportSecurity": {
+              "AccessControlMaxAgeSec": 31536000,
+              "Override": true
+            }
+          }
+        }
+      }
+    },
+    "Distribution": {
+      "Type": "AWS::CloudFront::Distribution",
+      "Properties": {
+        "DistributionConfig": {
+          "Enabled": true,
+          "Comment": "SRE-Agent v2 judging demo",
+          "PriceClass": "PriceClass_100",
+          "HttpVersion": "http2",
+          "IPV6Enabled": true,
+          "ViewerCertificate": {
+            "CloudFrontDefaultCertificate": true
+          },
+          "Origins": [
+            {
+              "Id": "application",
+              "DomainName": {
+                "Fn::GetAtt": [
+                  "LoadBalancer",
+                  "DNSName"
+                ]
+              },
+              "CustomOriginConfig": {
+                "HTTPPort": 80,
+                "OriginProtocolPolicy": "http-only",
+                "OriginReadTimeout": 60,
+                "OriginKeepaliveTimeout": 60
+              },
+              "OriginCustomHeaders": [
+                {
+                  "HeaderName": "X-SRE-Origin",
+                  "HeaderValue": {
+                    "Fn::Sub": "{{resolve:secretsmanager:${RuntimeSecretArn}:SecretString:ORIGIN_TOKEN}}"
+                  }
+                }
+              ]
+            }
+          ],
+          "DefaultCacheBehavior": {
+            "TargetOriginId": "application",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": [
+              "GET",
+              "HEAD",
+              "OPTIONS",
+              "PUT",
+              "POST",
+              "PATCH",
+              "DELETE"
+            ],
+            "CachedMethods": [
+              "GET",
+              "HEAD"
+            ],
+            "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+            "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+            "ResponseHeadersPolicyId": {
+              "Ref": "ResponseHeaders"
+            },
+            "Compress": true
+          }
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "DemoUrl": {
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "https://",
+            {
+              "Fn::GetAtt": [
+                "Distribution",
+                "DomainName"
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    "DistributionId": {
+      "Value": {
+        "Ref": "Distribution"
+      }
+    },
+    "Cluster": {
+      "Value": {
+        "Ref": "Cluster"
+      }
+    },
+    "Service": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Service",
+          "Name"
+        ]
+      }
+    },
+    "TargetGroupArn": {
+      "Value": {
+        "Ref": "TargetGroup"
+      }
+    },
+    "ApplicationRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "ApplicationRole",
+          "Arn"
+        ]
+      }
+    },
+    "ApplicationSecurityGroup": {
+      "Value": {
+        "Ref": "ApplicationSecurityGroup"
+      }
+    },
+    "LogGroup": {
+      "Value": {
+        "Ref": "Logs"
+      }
+    }
+  }
+}

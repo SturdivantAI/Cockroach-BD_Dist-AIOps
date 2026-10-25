@@ -374,7 +374,6 @@ def insert_incidents(conn, incidents: list[dict]) -> dict[str, str]:
         )
         alert_to_uuid[inc["alert_id"]] = incident_id
 
-    conn.commit()
     return alert_to_uuid
 
 
@@ -421,6 +420,8 @@ def insert_embeddings(conn, incidents: list[dict], alert_to_uuid: dict, use_bedr
                     "service": inc["service"],
                     "incident_class": inc["incident_class"],
                     "severity": inc["severity"],
+                    "provenance": "synthetic_seed_fixture",
+                    "outcome_verified": False,
                 }),
                 "incident",
             ),
@@ -455,17 +456,18 @@ def insert_embeddings(conn, incidents: list[dict], alert_to_uuid: dict, use_bedr
                     "service": inc["service"],
                     "incident_class": inc["incident_class"],
                     "type": "resolution",
+                    "provenance": "synthetic_seed_fixture",
+                    "outcome_verified": False,
                 }),
                 "resolution",
             ),
         )
 
-    conn.commit()
 
 
 def main() -> None:
     """Seed the database with incidents and embeddings."""
-    parser = argparse.ArgumentParser(description="Seed CockroachDB with sample incidents")
+    parser = argparse.ArgumentParser(description="Seed the configured database with synthetic incidents")
     parser.add_argument(
         "--skip-embeddings",
         action="store_true",
@@ -480,17 +482,17 @@ def main() -> None:
     print("=" * 50)
     print(f"Incidents to seed: {len(SEED_INCIDENTS)}")
     print(f"Embedding source: {'AWS Bedrock Titan' if use_bedrock else 'Fake (deterministic)'}")
-    print(f"Database: {settings.cockroachdb_host}")
+    print(f"Database backend: {settings.db_backend}")
+    print("Provenance: synthetic fixtures, not verified operational outcomes")
     print()
 
-    import psycopg
-    from psycopg.rows import dict_row
+    from agents.db import get_connection
 
     try:
-        conn = psycopg.connect(settings.cockroachdb_dsn, row_factory=dict_row)
+        conn = get_connection()
     except Exception as e:
-        print(f"ERROR: Could not connect to CockroachDB: {e}")
-        print("Ensure migrations have been applied first: python data/migrations/apply.py")
+        print(f"ERROR: Could not connect to the configured database: {type(e).__name__}")
+        print("Check database settings and ensure the backend-specific schema is applied.")
         sys.exit(1)
 
     with conn:
@@ -499,9 +501,6 @@ def main() -> None:
         row = result.fetchone()
         if row and row["cnt"] > 0:
             print(f"Database already has {row['cnt']} incidents. Skipping seed.")
-            print("To re-seed, truncate the incidents table first:")
-            print("  TRUNCATE incidents CASCADE;")
-            conn.close()
             return
 
         # Insert incidents

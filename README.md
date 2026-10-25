@@ -1,229 +1,133 @@
-# SRE Memory Agent
+# SRE-Agent V2: Trust-Aware Agentic Memory
 
-**Incident Response with Persistent Agentic Memory**
+AI incident response with memory it can trust.
 
-An AI SRE assistant that diagnoses incidents better the second time because CockroachDB gives it globally distributed, never-down memory. The agent learns from past resolutions and applies that knowledge to future incidents — measurably faster and more accurately.
+SRE-Agent V2 tests whether validating historical incident memory prevents an agent from reusing obsolete or altered recommendations. NVIDIA Nemotron runs through Nebius Token Factory. PostgreSQL with pgvector stores incidents and linked execution evidence; Amazon Bedrock Titan produces 1,024-dimensional embeddings.
 
-> Alert fires → Agent reasons with memory → Proposes fix (human gate) → Second incident resolves faster → Judge scores the improvement delta
+The application offers saved experimental replay and a live validated workflow. The live workflow records a proposed action. It does not execute remediation or claim that a service recovered.
 
-## Multi-Region Memory: Zero Data Loss
+## Run the replay
 
-This system is deployed across **us-east-1**, **us-east-2**, and **us-west-2** on CockroachDB with `SURVIVE REGION FAILURE` enabled. Every agent memory write is synchronously replicated across all 3 regions via Raft consensus before being acknowledged. If an entire AWS region goes offline, the agent's memory is intact and immediately available from the surviving regions — zero data loss, zero manual intervention, automatic failover.
+Use the v2 checkout containing this README. The archived v1 main branch may not contain these files. Python 3.12 on Linux is the tested environment. Run each command separately from the repository root.
 
-See [docs/multi-region-resilience.md](docs/multi-region-resilience.md) for the full technical explanation.
-
----
-
-## CockroachDB Tools Used (3 of 4)
-
-| Tool | How the Agent Uses It |
-|------|----------------------|
-| **Distributed Vector Indexing** | Stores incident embeddings (1536-dim Titan vectors) for semantic retrieval of similar past incidents via cosine similarity |
-| **MCP Server** | Exposes the memory layer to external agents/tools with full audit logging |
-| **ccloud CLI** | Automated cluster provisioning, backup scheduling after resolution, audit log retrieval by the ops agent |
-
-## AWS Services Used
-
-| Service | Role |
-|---------|------|
-| **Amazon Bedrock** | Claude 3.5 Sonnet (chain-of-thought reasoning) + Titan Embeddings v2 (vector generation) |
-| **AWS Step Functions** | Agent workflow orchestration with human-in-the-loop approval gate |
-| **AWS Lambda** | Executes each agent step (ingestion, retrieval, analysis, decision, memory write) |
-| **Amazon S3** | Incident artifacts, logs, model outputs |
-| **AWS Secrets Manager** | CockroachDB credentials (no secrets in code) |
-
-## Databricks Integration
-
-| Component | Purpose |
-|-----------|---------|
-| **Delta Live Tables** | Sync incident data from CockroachDB (JDBC) into bronze/silver/gold layers |
-| **MLflow** | Track retrieval quality, model latency, judge scores, confidence deltas per run |
-| **Evaluation Harness** | Compare agent performance with vs without memory (the visible metric) |
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Alert Source                                   │
-│  Synthetic CloudWatch Alert ──triggers──► AWS Lambda (Ingestion)     │
-└───────────────────────────────────┬─────────────────────────────────┘
-                                    │
-┌───────────────────────────────────▼─────────────────────────────────┐
-│                    Orchestration Layer                                │
-│  AWS Step Functions ──► Retrieval ──► Analysis ──► Decision          │
-│                                                    ──► Approval Gate │
-└──────┬────────────────────┬───────────────────────────┬─────────────┘
-       │                    │                           │
-┌──────▼──────┐    ┌───────▼────────┐    ┌────────────▼──────────────┐
-│ Memory Layer │    │   AI Layer     │    │   Data Intelligence       │
-│ CockroachDB  │    │  AWS Bedrock   │    │   Databricks              │
-│              │    │                │    │                           │
-│ • Vector Idx │    │ • Claude 3.5   │    │ • Delta Live Tables       │
-│ • Agent Mem  │    │ • Titan Embed  │    │ • MLflow Tracking         │
-│ • Decisions  │    │ • LLM-as-Judge │    │ • Eval Dashboard          │
-│ • MCP Server │    │                │    │                           │
-└──────────────┘    └────────────────┘    └───────────────────────────┘
-```
-
-See [docs/architecture.md](docs/architecture.md) for the full Mermaid diagram.
-
----
-
-## Project Structure
-
-```
-├── agents/                    # Multi-agent system
-│   ├── retrieval/             # Vector search agent (CockroachDB)
-│   ├── analysis/              # Chain-of-thought reasoning (Claude)
-│   ├── decision/              # Remediation with confidence gating
-│   ├── ops/                   # ccloud CLI operations agent
-│   ├── orchestrator.py        # Local workflow runner
-│   ├── lambda_handlers.py     # AWS Lambda entry points
-│   ├── bedrock_client.py      # Bedrock API with retry/backoff
-│   ├── db.py                  # CockroachDB connection management
-│   ├── config.py              # Centralized settings (pydantic)
-│   ├── resilience.py          # Rate limiter + circuit breaker
-│   ├── secrets.py             # AWS Secrets Manager integration
-│   ├── health.py              # System health checks
-│   └── logging_config.py      # Structured JSON logging
-├── data/
-│   ├── migrations/            # CockroachDB schema (4 SQL files)
-│   ├── sample_incidents/      # Ground truth + schema
-│   ├── seed_incidents.py      # Populate DB with 20 incidents
-│   └── generate_incidents.py  # Bedrock-powered variant generator
-├── evaluation/
-│   ├── run_evaluation_pair.py # Memory improvement loop demo
-│   ├── judge.py               # LLM-as-Judge (4 dimensions, 1-5)
-│   ├── mlflow_tracker.py      # MLflow experiment logging
-│   └── databricks/            # DLT pipeline + dashboard queries
-├── frontend/
-│   └── app.py                 # Streamlit three-panel UI
-├── infra/
-│   ├── provision-cluster.ps1  # ccloud CLI provisioning (Windows)
-│   ├── provision-cluster.sh   # ccloud CLI provisioning (Linux/Mac)
-│   ├── template.yaml          # AWS SAM template
-│   ├── deploy.ps1             # SAM deployment script
-│   └── samconfig.toml         # SAM configuration
-└── docs/
-    └── architecture.md        # Full architecture with Mermaid diagram
-```
-
----
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.11+
-- AWS CLI configured with Bedrock model access (Claude 3.5 Sonnet + Titan Embeddings v2)
-- [CockroachDB ccloud CLI](https://www.cockroachlabs.com/docs/cockroachcloud/ccloud-get-started)
-- (Optional) Databricks workspace for MLflow tracking
-
-### 1. Install
+Create an environment:
 
 ```bash
-git clone https://github.com/SturdivantAI-Lab/Cockroach-BD_Dist-AIOps.git
-cd Cockroach-BD_Dist-AIOps
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # Linux/Mac
-pip install -e ".[dev]"
+python3.12 -m venv .venv
 ```
 
-### 2. Configure
+Install the pinned runtime:
 
 ```bash
-cp .env.example .env
-# Edit .env with your CockroachDB and AWS credentials
+.venv/bin/python -m pip install -r requirements.lock
 ```
 
-### 3. Provision CockroachDB
-
-```powershell
-cd infra
-.\provision-cluster.ps1
-# Follow prompts, copy credentials to .env
-```
-
-### 4. Apply Schema & Seed Data
+Start the interface:
 
 ```bash
-python data/migrations/apply.py
-python data/seed_incidents.py --skip-embeddings  # Without AWS
-python data/seed_incidents.py                     # With Bedrock Titan
+.venv/bin/python -m streamlit run frontend/app.py --server.address 127.0.0.1 --server.port 8501
 ```
 
-### 5. Health Check
+Open http://127.0.0.1:8501. Saved replay requires no API keys, database connection, or inference calls. Select **Stale experience** and inspect the ordinary and validated recommendations. The repository includes the complete 21-episode report.
+
+## What the pilot showed
+
+The fixed experiment used one synthetic release-regression incident and three calls per condition/mode. The no-memory control was shared.
+
+| Memory | Ordinary: correct / attempts | Validated: correct / attempts |
+|---|---:|---:|
+| Clean | 3/3 | 3/3 |
+| Stale | 0/3 | 3/3 |
+| Poisoned | 3/3 | 3/3 |
+| None | 3/3 shared control | Shared control |
+
+Ordinary stale memory recommended release v0, which belonged to an obsolete configuration contract. Validated memory withheld those records; the model recommended v1. No unsafe recommendations occurred in this 21-call run. The run used 11,964 reported tokens; validated episodes added approximately 0.67 to 0.70 seconds, mostly evidence lookup and connection setup.
+
+These are repeated calls on one synthetic incident. They do not establish general reliability, statistical significance, or operational recovery. An earlier prompt version produced an unsafe recommendation under poisoned memory; preserve that result separately rather than pooling prompt versions.
+
+- [Complete fixed-run evidence](evaluation/results/controlled-comparison-20261024T135140Z-3c5e0acb.json)
+- [Independent score and trace recomputation](evaluation/results/repeat-audit-20261024T135140Z-3c5e0acb.json)
+
+The replay checks prompt fingerprints and recomputes structured-action scores. This validates internal consistency, not the authenticity of arbitrary uploaded evidence.
+
+## Live configuration
+
+Copy the example without overwriting an existing configuration:
 
 ```bash
-python -m agents.health
+cp -n .env.example .env
 ```
 
-### 6. Run Demo
+Populate `NEBIUS_API_KEY`, `RDS_HOST`, and `RDS_SECRET_ARN`. Keep configuration files local. The application obtains the database username and password from the managed RDS secret. The public AWS RDS certificate bundle is included at `certs/aws-rds-global.pem`.
+
+Use AWS credentials through the normal SDK credential chain. On hosted AWS infrastructure, use a workload role. Live inference needs Titan model invocation and access to the configured database secret. Database authentication, a reachable endpoint, and an inbound rule from the application host are also required.
+
+The existing project database is already initialized. For a different, empty PostgreSQL database with pgvector available, initialize it once:
 
 ```bash
-streamlit run frontend/app.py
+.venv/bin/python -m data.bootstrap_postgresql
 ```
 
-### 7. Run Evaluation
+The initializer refuses to overwrite a database containing tables. Do not use the original CockroachDB migration runner for PostgreSQL. The new schema is `data/migrations/postgresql/001_initial.sql`.
+
+Optional synthetic incident seeds make billable embedding requests:
 
 ```bash
-python evaluation/run_evaluation_pair.py --all
-python evaluation/judge.py --all-pairs
+.venv/bin/python -m data.seed_incidents
 ```
 
----
+Seed fixtures are not verified operational history. Default validation withholds unverified memory. The experiment runner opts into simulation evidence explicitly; normal live retrieval does not.
 
-## The Memory Improvement Loop (Key Feature)
+## Architecture and trust boundary
 
-```
-Incident A (first encounter):
-  → No memory available
-  → Agent reasons from scratch
-  → Confidence: 0.6, Steps: 5
-  → Resolution written to CockroachDB memory
-
-Incident A' (same class, different service):
-  → Memory recalls A's resolution (cosine similarity)
-  → Agent cites prior resolution in reasoning
-  → Confidence: 0.85, Steps: 3
-  → Judge scores improvement: +0.25 confidence, -2 steps
+```text
+Alert -> ingest -> retrieve distinct incidents + prior agent records
+      -> validate against execution/verification ledger
+      -> NVIDIA analysis -> NVIDIA decision -> record unexecuted proposal
 ```
 
-This is not a toy. The improvement is measurable, reproducible, and scored by an independent LLM judge.
+Validation checks the recorded execution outcome, evidence age, service scope, configuration compatibility, and incident fingerprint. It covers retrieved incidents and prior agent records. Model confidence and a memory's own success flag cannot establish a verified outcome. Exact cosine search is used for the pilot; approximate HNSW retrieval is deferred.
 
----
+The ledger is a trust boundary. A trusted verifier must create its evidence. The current simulator is a small deterministic state machine with declared release-health assumptions. It is not a production service monitor.
 
-## Known Limitations & Future Work
+## Tests and experiments
 
-| Limitation | Context | Production Mitigation |
-|---|---|---|
-| **Evaluation sample size (n=5 pairs)** | Sufficient for hackathon demo; not statistically significant | Expand to 50+ pairs with confidence intervals |
-| **Ceiling effect** | Baseline score 4.15/5.0 limits observable improvement headroom | Use finer-grained scoring (1-10) or domain-specific rubrics |
-| **Same-model judge** | Claude scores Claude's output (potential self-bias) | Use a different model family for judging, or human evaluators |
-| **2/5 improvement rate** | Mean delta (+0.60) is carried by 2 strong pairs; 3 were flat due to high baseline | More incident classes with harder variants would separate signal |
-| **No repeated judging** | Single judge pass per pair; no inter-rater reliability | Run 3+ judge passes per pair, report median and variance |
+Install development tools when needed:
 
-These are documented honestly because the architecture is sound — the memory mechanism works — but the evaluation harness needs production-grade rigor before deployment beyond a demo.
+```bash
+.venv/bin/python -m pip install -e '.[dev]'
+```
 
----
+Run offline tests:
 
-## Demo Video
+```bash
+.venv/bin/python -m pytest tests -q
+```
 
-[Video Link TBD]
+Check publishable files for known local secrets and common credential patterns:
 
-**Beat sheet (< 3 minutes):**
-- 0:00–0:20 — Alert fires (press button, signal panel)
-- 0:20–1:00 — Agent retrieves + reasons (stream, "No prior memory")
-- 1:00–1:30 — Remediation proposed, approval clicked
-- 1:30–2:10 — Second alert (same class), agent resolves faster, memory panel shows prior resolution
-- 2:10–2:40 — Judge scores displayed, bar chart shows delta
-- 2:40–3:00 — Architecture diagram
+```bash
+.venv/bin/python tools/check_secrets.py
+```
 
----
+Run the database-backed gate smoke test. It writes five synthetic records but makes no inference calls:
 
-## License
+```bash
+.venv/bin/python -m evaluation.run_memory_validation_smoke
+```
 
-MIT — see [LICENSE](LICENSE)
+Run the controlled comparison with three repeats. It writes two synthetic fixtures and makes 21 billable NVIDIA calls:
+
+```bash
+.venv/bin/python -m evaluation.run_controlled_comparison --repeats 3
+```
+
+Reports are saved under `~/sre-agent-v2-results/`, with code fingerprints and request timings. Ordinary and validated arms receive the same current alert. The selected memory is the experimental intervention. Filtering can reduce context to the no-memory control; the experiment does not claim that the model itself learns to detect contamination.
+
+## Deployment and inherited code
+
+See [deployment instructions](docs/deployment.md) for container startup, hosted access, and rollback. A hosted live form requires a demo access code; replay remains public. The container includes no local environment file or AWS credentials.
+
+V2 inherits the incident agents, fixtures, and local orchestration from [Cockroach-BD_Dist-AIOps](https://github.com/SturdivantAI/Cockroach-BD_Dist-AIOps). V2 adds the PostgreSQL schema, managed-secret connection path, Nebius provider, evidence gate, separate proposal persistence, controlled simulator, evaluation reports, and comparison interface. The old Step Functions, CockroachDB operations, Databricks, and judge code remain historical integrations; they are not the tested v2 deployment path. Optional dependencies for those integrations are available through `.[legacy]`.
+
+The [v1 README](docs/v1-foundation.md) is preserved for historical context. MIT license: [LICENSE](LICENSE).

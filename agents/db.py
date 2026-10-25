@@ -1,7 +1,9 @@
-"""Database connection management for CockroachDB."""
+"""Database connections for the legacy backend and RDS PostgreSQL."""
 
 import contextlib
+import json
 from collections.abc import Generator
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -11,7 +13,40 @@ from agents.config import settings
 
 
 def get_connection() -> psycopg.Connection:
-    """Create a new database connection to CockroachDB."""
+    """Connect with verified TLS; fetch managed RDS credentials without logging them."""
+    if settings.db_backend == "rds_postgresql":
+        import boto3
+
+        if not settings.rds_host or not settings.rds_database or not settings.rds_secret_arn:
+            raise ValueError("RDS host, database, and secret ARN must be configured")
+        certificate = Path(settings.rds_sslrootcert).expanduser()
+        if not certificate.is_absolute():
+            certificate = Path(__file__).resolve().parent.parent / certificate
+        if not settings.rds_sslrootcert or not certificate.is_file():
+            raise ValueError("RDS certificate bundle must point to an existing file")
+        response = boto3.client(
+            "secretsmanager", region_name=settings.aws_region
+        ).get_secret_value(SecretId=settings.rds_secret_arn)
+        try:
+            credentials = json.loads(response["SecretString"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("RDS secret must contain a JSON credentials object") from None
+        if not isinstance(credentials, dict) or any(
+            not isinstance(credentials.get(key), str) or not credentials[key]
+            for key in ("username", "password")
+        ):
+            raise ValueError("RDS secret must contain nonempty username and password strings")
+        return psycopg.connect(
+            host=settings.rds_host,
+            port=settings.rds_port,
+            dbname=settings.rds_database,
+            user=credentials["username"],
+            password=credentials["password"],
+            sslmode="verify-full",
+            sslrootcert=str(certificate),
+            connect_timeout=settings.db_connect_timeout,
+            row_factory=dict_row,
+        )
     return psycopg.connect(settings.cockroachdb_dsn, row_factory=dict_row)
 
 

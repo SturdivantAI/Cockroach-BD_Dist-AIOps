@@ -1,0 +1,24 @@
+{
+  "run_id": "20261024T135140Z-3c5e0acb",
+  "status": "passed",
+  "episodes_audited": 21,
+  "source_sha256": "258d2c6d2d9dbaeebe8a630cc7b061b7efa2e217662ee4ca8d5269c86a337fb2",
+  "code_source_sha256": "52212d52f8797139b63901a7365b4785503f06ccdad176596aa99d25138ccf7e",
+  "checks": [
+    "source identity",
+    "prompt hashes and reconstruction",
+    "fixed prompts across all three repeats",
+    "raw response parsing",
+    "deterministic action rescoring",
+    "validation trace replay",
+    "complete repeat indices",
+    "summary recomputation"
+  ],
+  "total_tokens": 11964,
+  "limitations": [
+    "Repeated calls on one synthetic scenario, not independent incident diversity.",
+    "No unsafe recommendations observed in the revised 21-call run; do not claim demonstrated safety improvement from it.",
+    "Earlier prompt version must remain separate.",
+    "Full orchestrated application still requires integration validation."
+  ]
+}

@@ -1,0 +1,25 @@
+.git
+.venv
+venv
+__pycache__
+**/__pycache__
+*.pyc
+.env
+.env.*
+.aws
+.streamlit/secrets.toml
+*.key
+*.pem
+!certs/aws-rds-global.pem
+*.crt
+*.log
+logs
+.pytest_cache
+.mypy_cache
+.ruff_cache
+dist
+build
+*.egg-info
+mlruns
+mlartifacts
+Project Planining
