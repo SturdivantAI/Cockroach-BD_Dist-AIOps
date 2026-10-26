@@ -69,3 +69,7 @@ The hackathon rules require a working demo or test build and availability throug
 ## Files excluded from the image
 
 The Docker build excludes `.env` files, `.aws`, Streamlit secrets, private keys, local virtual environments, and Git metadata. The one included PEM file is the public AWS RDS trust bundle. `tools/check_secrets.py` checks publishable Git files for known local values and credential patterns; it is not an exhaustive security scanner.
+
+## Configuration-version upgrade
+
+Before deploying code that preserves incident configuration versions, apply `data/migrations/postgresql/002_incident_configuration.sql` using the database administrator connection. It adds a nullable column without rewriting historical scope. Existing rows retain unknown configuration versions; do not backfill them from verifier receipts. Fresh database initialization applies both numbered migrations. Deploy the corrected image only after this migration succeeds. The previous image can run with the added nullable column.

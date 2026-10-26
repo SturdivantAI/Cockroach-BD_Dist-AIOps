@@ -100,6 +100,7 @@ def _vector_search(
             i.resolution,
             i.incident_class,
             i.resolved_at,
+            i.configuration_version,
             (ie.embedding <=> %s::VECTOR(1024)) AS distance
         FROM incident_embeddings ie
         JOIN incidents i ON i.id = ie.incident_id
@@ -136,6 +137,7 @@ def _vector_search(
             "incident_class": row["incident_class"],
             "embedding_type": row["embedding_type"],
             "metadata": row["metadata"],
+            "configuration_version": row["configuration_version"],
             "similarity_score": round(1.0 - float(row["distance"]), 4),
             "resolved_at": row["resolved_at"].isoformat() if row["resolved_at"] else None,
         })

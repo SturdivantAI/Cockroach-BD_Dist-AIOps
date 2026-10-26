@@ -87,8 +87,8 @@ def ingest_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
         execute_command(
             """
-            INSERT INTO incidents (id, alert_id, severity, service, description, raw_logs, incident_class)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO incidents (id, alert_id, severity, service, description, raw_logs, incident_class, configuration_version)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 incident_id,
@@ -98,6 +98,7 @@ def ingest_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 alert.get("description", ""),
                 json.dumps(alert.get("logs") or alert.get("raw_logs") or []),
                 alert.get("incident_class"),
+                alert.get("configuration_version"),
             ),
         )
 

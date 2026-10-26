@@ -18,7 +18,8 @@ def main() -> None:
         if existing:
             raise RuntimeError("Database already contains tables; initialization refused")
         conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
-        conn.execute(schema.read_text(encoding="utf-8"))
+        for migration in sorted(schema.parent.glob("[0-9]*.sql")):
+            conn.execute(migration.read_text(encoding="utf-8"))
     print("PostgreSQL schema initialized; no fixtures or operational data loaded")
 
 

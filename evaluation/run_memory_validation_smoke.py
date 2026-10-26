@@ -39,12 +39,12 @@ def create_fixture(
     with get_connection() as conn:
         row = conn.execute(
             "INSERT INTO incidents (id, alert_id, severity, service, description, raw_logs, "
-            "root_cause, resolution, incident_class, resolved_at) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
+            "root_cause, resolution, incident_class, resolved_at, configuration_version) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
             (incident_id, "simulation-smoke-" + session_id, "high", "payment-service",
              "Synthetic fixture: error rate increased after release v2.",
              json.dumps({"source": outcome["source"], "before": outcome["before"]}),
-             hypothesis, proposal, "release_regression", finished),
+             hypothesis, proposal, "release_regression", finished, configuration_version),
         ).fetchone()
         if row is None:
             raise RuntimeError("Fixture insert did not return an incident")
@@ -53,7 +53,7 @@ def create_fixture(
             "service", "severity", "description", "root_cause", "resolution", "incident_class"
         )}
         item.update(incident_id=incident_id, resolved_at=row["resolved_at"].isoformat(),
-                    configuration_version=configuration_version)
+                    configuration_version=row["configuration_version"])
         conn.execute(
             "INSERT INTO agent_decisions (id,incident_id,session_id,hypothesis,confidence,proposed_action) "
             "VALUES (%s,%s,%s,%s,%s,%s)",
