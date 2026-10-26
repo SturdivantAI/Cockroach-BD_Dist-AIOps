@@ -1,5 +1,6 @@
 """Publish the verified image without leaving an ECR login token on disk."""
 
+import argparse
 import base64
 import json
 import subprocess
@@ -11,18 +12,21 @@ import boto3
 
 def main() -> None:
     root = Path(__file__).resolve().parents[2]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--release", default="release/verification-20261024.json")
+    args = parser.parse_args()
     target = Path(__file__).with_name("deployment-state.json")
     state = json.loads(target.read_text())
-    release = json.loads((root / "release/verification-20261024.json").read_text())
+    release = json.loads((root / args.release).read_text())
     local = subprocess.run(
         ["docker", "image", "inspect", release["image_tag"], "--format", "{{.Id}}"],
         check=True, capture_output=True, text=True,
     ).stdout.strip()
-    if local not in {release["image_config_digest"], release["image_manifest_digest"]}:
+    if local not in {release.get("local_image_id", release.get("image_config_digest")), release["image_manifest_digest"]}:
         raise RuntimeError("Local image differs from the verified release")
     ecr = boto3.client("ecr", region_name=state["region"])
     suffix = release["image_manifest_digest"].split(":")[1][:8]
-    tag = "v0.2.0-" + suffix
+    tag = "v" + release.get("version", "0.2.0") + "-" + suffix
     uri = state["repository_uri"] + ":" + tag
     exists = ecr.batch_get_image(repositoryName="sre-agent-v2", imageIds=[{"imageTag": tag}])["images"]
     if not exists:

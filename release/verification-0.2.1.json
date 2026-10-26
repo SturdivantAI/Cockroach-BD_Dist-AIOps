@@ -1,0 +1,18 @@
+{
+  "version": "0.2.1",
+  "image_tag": "sre-agent-v2:0.2.1",
+  "local_image_id": "sha256:fb32fa18b16cb9c95cd1330ce77017b5ca0ebe552bf4996132079c502f6a8148",
+  "image_manifest_digest": "sha256:fb32fa18b16cb9c95cd1330ce77017b5ca0ebe552bf4996132079c502f6a8148",
+  "source_commit": "6bee062",
+  "checks": {
+    "local_tests": "60 passed, user-reported",
+    "database_smoke": "four cases passed, user-reported",
+    "offline_container_replay": "passed, user-reported",
+    "configuration_migration": "applied; text column confirmed, user-reported",
+    "ecs_task": "RUNNING and HEALTHY; matching image digest; user-reported",
+    "https_health": "HTTP 200; user-reported",
+    "hosted_replay": "loads without errors; user-confirmed"
+  },
+  "registry_digest_status": "ECR digest matched local image; user-reported publisher output",
+  "deployment_status": "CloudFormation UPDATE_COMPLETE; user-reported"
+}
