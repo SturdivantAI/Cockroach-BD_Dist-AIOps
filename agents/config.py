@@ -1,13 +1,39 @@
 """Centralized configuration for the SRE Memory Agent system."""
 
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
+
+
+def _default_rds_certificate() -> str:
+    packaged = Path(__file__).resolve().parent / "certs/aws-rds-global.pem"
+    if packaged.is_file():
+        return str(packaged)
+    return str(Path(__file__).resolve().parent.parent / "certs/aws-rds-global.pem")
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
+
+    db_backend: Literal["cockroachdb", "rds_postgresql"] = "cockroachdb"
+    rds_host: str = ""
+    rds_port: int = Field(default=5432, ge=1, le=65535)
+    rds_database: str = "sre_agent"
+    rds_secret_arn: str = ""
+    rds_sslrootcert: str = _default_rds_certificate()
+    db_connect_timeout: int = Field(default=10, ge=1, le=120)
+
+    inference_provider: Literal["bedrock", "nebius"] = "bedrock"
+    nebius_api_key: SecretStr = SecretStr("")
+    nebius_model_id: str = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"
+    inference_timeout_seconds: float = Field(default=120, gt=0, le=300)
+    memory_validation_enabled: bool = True
+    memory_max_age_days: int = Field(default=30, ge=1)
+    memory_allow_simulation: bool = False
+    deployment_mode: Literal["local", "hosted"] = "local"
+    demo_access_code: SecretStr = SecretStr("")
 
     # CockroachDB
     cockroachdb_host: str = Field(default="localhost")
@@ -37,7 +63,10 @@ class Settings(BaseSettings):
     retrieval_top_k: int = Field(default=5)
     confidence_threshold: float = Field(default=0.7)
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {
+        "env_file": Path(__file__).resolve().parent.parent / ".env",
+        "env_file_encoding": "utf-8",
+    }
 
     @property
     def cockroachdb_dsn(self) -> str:

@@ -1,0 +1,233 @@
+{
+  "session_id": "5fee57c7-33d6-4cdd-84e6-3c920589af38",
+  "incident_id": "183e26fa-b1b5-49f8-bbc5-d5d0444addfd",
+  "ingestion": {
+    "status": "ingested",
+    "incident_id": "183e26fa-b1b5-49f8-bbc5-d5d0444addfd",
+    "session_id": "5fee57c7-33d6-4cdd-84e6-3c920589af38",
+    "alert": {
+      "alert_id": "ui-24b9f0fbfdb34afcafb79f075bf3be41",
+      "service": "payment-service",
+      "severity": "high",
+      "configuration_version": "release-contract-v1",
+      "description": "Error rate rose from 0.5% to 25% immediately after deploying release v2.",
+      "logs": [
+        "deployment_complete release=v2",
+        "http_5xx_rate=0.25",
+        "audit_logging=enabled"
+      ],
+      "session_id": "5fee57c7-33d6-4cdd-84e6-3c920589af38"
+    },
+    "service": "payment-service",
+    "severity": "high"
+  },
+  "retrieval": {
+    "similar_incidents": [],
+    "prior_reasoning": [],
+    "confidence": 0.0,
+    "memory_available": false,
+    "num_similar": 0,
+    "num_prior_reasoning": 0,
+    "validation_enabled": true,
+    "validation_report": [
+      {
+        "channel": "incident",
+        "item_id": "7b585d61-43ca-48fc-b919-16de059a0cc3",
+        "verdict": "withhold",
+        "reason": "no_matching_verification",
+        "verification_id": null,
+        "evidence_scope": null
+      },
+      {
+        "channel": "incident",
+        "item_id": "53000d85-076d-4408-aff7-fd88ffb01f1b",
+        "verdict": "withhold",
+        "reason": "no_matching_verification",
+        "verification_id": null,
+        "evidence_scope": null
+      },
+      {
+        "channel": "incident",
+        "item_id": "3b308652-35c9-4924-a03f-3b839678e708",
+        "verdict": "withhold",
+        "reason": "no_matching_verification",
+        "verification_id": null,
+        "evidence_scope": null
+      },
+      {
+        "channel": "incident",
+        "item_id": "8ead9010-31f0-4475-bf40-97ab25a01f38",
+        "verdict": "withhold",
+        "reason": "no_matching_verification",
+        "verification_id": null,
+        "evidence_scope": null
+      },
+      {
+        "channel": "incident",
+        "item_id": "48a612e3-f847-40a6-8214-f8157fa43b6d",
+        "verdict": "withhold",
+        "reason": "no_matching_verification",
+        "verification_id": null,
+        "evidence_scope": null
+      },
+      {
+        "channel": "prior_agent",
+        "item_id": "b1605a16-7f97-4764-aae1-f6d6fe92b206",
+        "verdict": "withhold",
+        "reason": "simulation_evidence_not_enabled",
+        "verification_id": null,
+        "evidence_scope": null
+      },
+      {
+        "channel": "prior_agent",
+        "item_id": "054a7a6a-594b-4e6f-a093-753b0f3c4ce6",
+        "verdict": "withhold",
+        "reason": "simulation_evidence_not_enabled",
+        "verification_id": null,
+        "evidence_scope": null
+      },
+      {
+        "channel": "prior_agent",
+        "item_id": "6680442e-98e8-402a-ac9d-90e409cfddf2",
+        "verdict": "withhold",
+        "reason": "simulation_evidence_not_enabled",
+        "verification_id": null,
+        "evidence_scope": null
+      },
+      {
+        "channel": "prior_agent",
+        "item_id": "e877d775-3b7c-4de1-ba80-d94e325cce5b",
+        "verdict": "withhold",
+        "reason": "simulation_evidence_not_enabled",
+        "verification_id": null,
+        "evidence_scope": null
+      },
+      {
+        "channel": "prior_agent",
+        "item_id": "9adba128-511a-46a1-a101-103b9e6466a9",
+        "verdict": "withhold",
+        "reason": "simulation_evidence_not_enabled",
+        "verification_id": null,
+        "evidence_scope": null
+      },
+      {
+        "channel": "prior_agent",
+        "item_id": "53c1a7c8-e65d-4daa-a53e-2f1f581cf713",
+        "verdict": "withhold",
+        "reason": "simulation_evidence_not_enabled",
+        "verification_id": null,
+        "evidence_scope": null
+      },
+      {
+        "channel": "prior_agent",
+        "item_id": "dde655bf-8131-499e-97d3-96732adbed2a",
+        "verdict": "withhold",
+        "reason": "simulation_evidence_not_enabled",
+        "verification_id": null,
+        "evidence_scope": null
+      }
+    ],
+    "session_id": "5fee57c7-33d6-4cdd-84e6-3c920589af38",
+    "incident_id": "183e26fa-b1b5-49f8-bbc5-d5d0444addfd",
+    "alert": {
+      "alert_id": "ui-24b9f0fbfdb34afcafb79f075bf3be41",
+      "service": "payment-service",
+      "severity": "high",
+      "configuration_version": "release-contract-v1",
+      "description": "Error rate rose from 0.5% to 25% immediately after deploying release v2.",
+      "logs": [
+        "deployment_complete release=v2",
+        "http_5xx_rate=0.25",
+        "audit_logging=enabled"
+      ],
+      "session_id": "5fee57c7-33d6-4cdd-84e6-3c920589af38"
+    },
+    "elapsed_ms": 667
+  },
+  "analysis": {
+    "hypothesis": "The release v2 introduced a code regression that causes unhandled exceptions or failed downstream calls, resulting in a 5xx error rate increase.",
+    "confidence": 0.92,
+    "reasoning_chain": [
+      "Error rate jumped from 0.5% to 25% immediately after deployment_complete release=v2",
+      "Pattern matches a deployment-induced regression where new code triggers 5xx responses",
+      "No prior similar incidents, but typical root cause for sudden error spikes post-deployment is a bug in the released code",
+      "Conclusion: the newly deployed v2 version is faulty and must be rolled back or patched"
+    ],
+    "evidence": [
+      {
+        "source": "alert",
+        "content": "Error rate rose from 0.5% to 25% immediately after deploying release v2",
+        "relevance": "Directly links the error spike to the deployment of v2"
+      },
+      {
+        "source": "log",
+        "content": "deployment_complete release=v2",
+        "relevance": "Confirms the deployment event occurred at the time of the error increase"
+      },
+      {
+        "source": "log",
+        "content": "http_5xx_rate=0.25",
+        "relevance": "Quantifies the 5xx error rate after deployment"
+      }
+    ],
+    "incident_class_guess": "unknown",
+    "suggested_resolution": "Roll back release v2 or hotfix the offending code; then re-deploy a stable version and monitor error rates",
+    "reasoning_steps_count": 4,
+    "session_id": "5fee57c7-33d6-4cdd-84e6-3c920589af38",
+    "incident_id": "183e26fa-b1b5-49f8-bbc5-d5d0444addfd",
+    "alert": {
+      "alert_id": "ui-24b9f0fbfdb34afcafb79f075bf3be41",
+      "service": "payment-service",
+      "severity": "high",
+      "configuration_version": "release-contract-v1",
+      "description": "Error rate rose from 0.5% to 25% immediately after deploying release v2.",
+      "logs": [
+        "deployment_complete release=v2",
+        "http_5xx_rate=0.25",
+        "audit_logging=enabled"
+      ],
+      "session_id": "5fee57c7-33d6-4cdd-84e6-3c920589af38"
+    },
+    "elapsed_ms": 5359
+  },
+  "decision": {
+    "decision_id": "b6e215be-3d89-4eed-a167-7782ea155eb2",
+    "action": "Investigate recent code changes in release v2 to identify the cause of the 5xx error spike",
+    "action_type": "investigation_steps",
+    "requires_approval": false,
+    "runbook_reference": "Incident Root Cause Analysis Runbook",
+    "estimated_impact": "Collect logs and code diff to pinpoint the regression; no service disruption",
+    "rollback_steps": "N/A (no rollback required for investigation)",
+    "estimated_resolution_time_minutes": 30,
+    "risk_level": "medium",
+    "confidence": 0.92,
+    "session_id": "5fee57c7-33d6-4cdd-84e6-3c920589af38",
+    "incident_id": "183e26fa-b1b5-49f8-bbc5-d5d0444addfd",
+    "elapsed_ms": 3152
+  },
+  "memory_write": {
+    "status": "proposal_recorded",
+    "session_id": "5fee57c7-33d6-4cdd-84e6-3c920589af38",
+    "incident_id": "183e26fa-b1b5-49f8-bbc5-d5d0444addfd",
+    "decision_id": "b6e215be-3d89-4eed-a167-7782ea155eb2",
+    "outcome_verified": false,
+    "memory_entries_created": 1
+  },
+  "total_elapsed_ms": 9852,
+  "steps_completed": [
+    "ingestion",
+    "retrieval",
+    "analysis",
+    "decision",
+    "write_memory"
+  ],
+  "errors": [],
+  "status": "proposal_recorded",
+  "execution_status": "not_executed",
+  "approval_status": "not_requested",
+  "inference_provider": "nebius",
+  "model_id": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B",
+  "embedding_model_id": "amazon.titan-embed-text-v2:0",
+  "validation_enabled": true,
+  "success": true
+}

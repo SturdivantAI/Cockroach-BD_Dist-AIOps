@@ -14,13 +14,26 @@ The human approval gate integrates with Step Functions task tokens.
 import json
 import logging
 import uuid
-from typing import Any
+from typing import Any, Literal
 
-from agents.bedrock_client import bedrock
+from pydantic import BaseModel, Field
+
+from agents.inference import invoke_text
 from agents.config import settings
 from agents.db import execute_command
 
 logger = logging.getLogger(__name__)
+
+
+class DecisionPayload(BaseModel):
+    action: str = Field(min_length=1)
+    action_type: Literal["automated_remediation", "investigation_steps", "escalate"]
+    requires_approval: bool
+    runbook_reference: str
+    estimated_impact: str
+    rollback_steps: str
+    estimated_resolution_time_minutes: int = Field(ge=0)
+    risk_level: Literal["low", "medium", "high"]
 
 
 DECISION_SYSTEM_PROMPT = """You are an SRE Decision Agent. Based on a root cause hypothesis \
@@ -90,10 +103,12 @@ class DecisionResult:
         self.risk_level = risk_level
         self.confidence = confidence
         self.hypothesis = hypothesis
+        self.decision_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for Step Functions payload."""
         return {
+            "decision_id": self.decision_id,
             "action": self.action,
             "action_type": self.action_type,
             "requires_approval": self.requires_approval,
@@ -193,17 +208,7 @@ def _parse_decision_response(response_text: str) -> dict[str, Any]:
             except json.JSONDecodeError:
                 pass
 
-    logger.warning("Failed to parse decision response, using defaults")
-    return {
-        "action": "Escalate to on-call engineer for manual investigation",
-        "action_type": "escalate",
-        "requires_approval": False,
-        "runbook_reference": "generic-incident-response",
-        "estimated_impact": "Unknown — manual investigation needed",
-        "rollback_steps": "N/A",
-        "estimated_resolution_time_minutes": 60,
-        "risk_level": "medium",
-    }
+    raise ValueError("Decision returned invalid JSON")
 
 
 def _write_decision_to_db(
@@ -215,22 +220,25 @@ def _write_decision_to_db(
     reasoning_steps: int,
 ) -> str:
     """Write decision to agent_decisions table. Returns decision ID."""
+    if not incident_id:
+        raise ValueError("A persisted incident ID is required to record a decision")
     decision_id = str(uuid.uuid4())
+    action_column = "proposed_action" if settings.db_backend == "rds_postgresql" else "resolution_applied"
 
     # Format memory_items_used as PostgreSQL UUID array
     uuid_array = "{" + ",".join(memory_items_used) + "}" if memory_items_used else "{}"
 
     try:
         execute_command(
-            """
+            f"""
             INSERT INTO agent_decisions
                 (id, incident_id, session_id, hypothesis, confidence, evidence,
-                 reasoning_steps, resolution_applied, memory_items_used, memory_enabled)
+                 reasoning_steps, {action_column}, memory_items_used, memory_enabled)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::UUID[], %s)
             """,
             (
                 decision_id,
-                incident_id or str(uuid.uuid4()),
+                incident_id,
                 session_id,
                 result.hypothesis,
                 result.confidence,
@@ -242,7 +250,8 @@ def _write_decision_to_db(
             ),
         )
     except Exception as e:
-        logger.warning("Failed to write decision to DB: %s", e)
+        logger.error("Failed to persist decision (%s)", type(e).__name__)
+        raise
 
     return decision_id
 
@@ -255,6 +264,9 @@ def _write_decision_to_memory(
 ) -> None:
     """Write decision action step to agent_memory."""
     content = {
+        "decision_id": result.decision_id,
+        "execution_status": "proposed",
+        "outcome_verified": False,
         "action": result.action,
         "action_type": result.action_type,
         "requires_approval": result.requires_approval,
@@ -332,25 +344,16 @@ def run(
 
     # Call Bedrock Claude for decision
     try:
-        response_text = bedrock.invoke_claude(
+        response_text = invoke_text(
             prompt=prompt,
             system=DECISION_SYSTEM_PROMPT,
             max_tokens=2048,
             temperature=0.2,
         )
-        parsed = _parse_decision_response(response_text)
+        parsed = DecisionPayload.model_validate(_parse_decision_response(response_text)).model_dump()
     except Exception as e:
         logger.error("Decision model call failed: %s", e)
-        parsed = {
-            "action": "Escalate to on-call engineer (model error)",
-            "action_type": "escalate",
-            "requires_approval": False,
-            "runbook_reference": "incident-escalation",
-            "estimated_impact": "Manual intervention required",
-            "rollback_steps": "N/A",
-            "estimated_resolution_time_minutes": 60,
-            "risk_level": "high",
-        }
+        raise RuntimeError("Decision inference or response validation failed") from e
 
     # Override requires_approval based on gating logic
     if parsed.get("action_type") == "automated_remediation":
@@ -382,7 +385,7 @@ def run(
     memory_enabled = retrieval_context.get("memory_available", False)
 
     # Write to agent_decisions table
-    _write_decision_to_db(
+    result.decision_id = _write_decision_to_db(
         session_id=session_id,
         incident_id=incident_id,
         result=result,

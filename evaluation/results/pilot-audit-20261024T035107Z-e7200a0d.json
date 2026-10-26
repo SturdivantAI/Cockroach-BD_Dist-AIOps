@@ -1,0 +1,20 @@
+{
+  "source_file": "/home/hectorumoh74/sre-agent-v2-results/controlled-comparison-20261024T035107Z-e7200a0d.json",
+  "source_sha256": "a6b00606a0dcc93e951080a6e552f7f7483c7e9458bdc8c0c8ec9e34b158ffc4",
+  "episodes": 7,
+  "checks": "prompt hashes, identical current incident, raw JSON parsing, independent structured-action scores, stop reasons, clean prompt parity, withheld prompt equivalence to control, both-channel gate decisions, snapshot ledger linkage",
+  "result": "checks_passed_with_design_limitations",
+  "usage": {
+    "prompt_tokens": 2074,
+    "completion_tokens": 2176,
+    "total_tokens": 4250
+  },
+  "limitations": [
+    "Single synthetic scenario and one attempt per condition.",
+    "Clean and stale ordinary prompts are identical; stale rejection is a gate test only.",
+    "Validated poisoned and stale prompts equal no-memory control; filtering, not diagnostic reasoning improvement.",
+    "Model latency excludes validator and database overhead.",
+    "Unsafe actions were blocked in simulation; no operational remediation occurred.",
+    "Report does not pin source revision, code hash, full validator timing, or exact inference request timestamps."
+  ]
+}

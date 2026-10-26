@@ -1,0 +1,23 @@
+{
+  "verified_at": "2026-10-25T02:11:57.049194+00:00",
+  "stack_status": "CREATE_COMPLETE",
+  "image_uri": "558899664120.dkr.ecr.us-east-1.amazonaws.com/sre-agent-v2@sha256:7d57c3ce87759d7414a1d42fba3bf486c1a215e3a0e96d5f06ab5a3145045e8b",
+  "outputs": {
+    "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:558899664120:targetgroup/sre-ag-Targe-OPU4BSDIM1WY/3dcc757dc62394b0",
+    "ApplicationRoleArn": "arn:aws:iam::558899664120:role/sre-agent-v2-demo-ApplicationRole-sFJ2CzM3YYXB",
+    "ApplicationSecurityGroup": "sg-09242fc37a3e72c48",
+    "LogGroup": "sre-agent-v2-demo-Logs-2kMz1LdkzFDo",
+    "DemoUrl": "https://ddetgfg1q184n.cloudfront.net",
+    "Cluster": "sre-agent-v2-demo-Cluster-uOnYEDqixDsK",
+    "Service": "sre-agent-v2-demo-Service-DWZWXSsnhstL",
+    "DistributionId": "E7OCLUFKWDQ79"
+  },
+  "checks": {
+    "https_health": "ok",
+    "browser_replay": "stale ordinary v0; validated v1; both configuration_mismatch",
+    "public_live_gate": "access code required",
+    "application_database_permissions": "allowed inserts rolled back; execution and verification writes denied"
+  },
+  "live_cloud_inference": "not yet tested through the hosted UI",
+  "transport": "HTTPS viewer; HTTP CloudFront-to-ALB origin protected by prefix list and secret header"
+}

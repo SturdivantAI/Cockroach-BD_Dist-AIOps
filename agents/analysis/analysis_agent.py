@@ -16,10 +16,21 @@ import logging
 import uuid
 from typing import Any
 
-from agents.bedrock_client import bedrock
+from pydantic import BaseModel, Field
+
+from agents.inference import invoke_text
 from agents.db import execute_command
 
 logger = logging.getLogger(__name__)
+
+
+class AnalysisPayload(BaseModel):
+    hypothesis: str = Field(min_length=1)
+    confidence: float = Field(ge=0, le=1, allow_inf_nan=False)
+    reasoning_chain: list[str]
+    evidence: list[dict[str, str]]
+    incident_class_guess: str = "unknown"
+    suggested_resolution: str = ""
 
 
 SYSTEM_PROMPT = """You are an expert Site Reliability Engineer analyst. Your role is to \
@@ -133,7 +144,7 @@ def _get_memory_guidance(similar_incidents: list[dict[str, Any]]) -> str:
             f"IMPORTANT: A highly similar past incident was found (similarity: {score:.2f}). "
             f"The prior resolution was: '{top_match.get('resolution')}'. "
             f"Assess whether this same resolution applies to the current incident. "
-            f"If the pattern matches, your confidence should be HIGH (>= 0.7). "
+            f"Similarity alone does not establish correctness or current applicability. "
             f"Cite the prior incident as evidence."
         )
     elif score >= 0.5:
@@ -204,15 +215,7 @@ def _parse_response(response_text: str) -> dict[str, Any]:
                 pass
 
     # Fallback: return a default structure
-    logger.warning("Failed to parse analysis response, using fallback")
-    return {
-        "hypothesis": "Unable to parse structured response. Raw: " + text[:200],
-        "confidence": 0.3,
-        "reasoning_chain": ["Response parsing failed"],
-        "evidence": [],
-        "incident_class_guess": "unknown",
-        "suggested_resolution": "",
-    }
+    raise ValueError("Analysis returned invalid JSON")
 
 
 def _write_reasoning_to_memory(
@@ -315,7 +318,7 @@ def run(
     # Call Bedrock Claude
     logger.info("Invoking Claude for analysis (prompt length=%d chars)", len(prompt))
     try:
-        response_text = bedrock.invoke_claude(
+        response_text = invoke_text(
             prompt=prompt,
             system=SYSTEM_PROMPT,
             max_tokens=4096,
@@ -323,17 +326,10 @@ def run(
         )
     except Exception as e:
         logger.error("Bedrock invocation failed: %s", e)
-        result = AnalysisResult(
-            hypothesis=f"Analysis failed due to model error: {str(e)[:100]}",
-            confidence=0.0,
-            reasoning_chain=["Model invocation failed"],
-            evidence=[],
-        )
-        _write_reasoning_to_memory(session_id, incident_id, result)
-        return result
+        raise RuntimeError("Analysis inference failed") from e
 
     # Parse the response
-    parsed = _parse_response(response_text)
+    parsed = AnalysisPayload.model_validate(_parse_response(response_text)).model_dump()
 
     result = AnalysisResult(
         hypothesis=parsed.get("hypothesis", "No hypothesis generated"),

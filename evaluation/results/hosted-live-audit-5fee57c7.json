@@ -1,0 +1,20 @@
+{
+  "source": "hosted-live-workflow-5fee57c7.json",
+  "sha256": "05a61b00f3097147be6c2b4a908872c027318ba193ff613fcbf152cba422defb",
+  "session_id": "5fee57c7-33d6-4cdd-84e6-3c920589af38",
+  "evidence_type": "user-downloaded hosted workflow trace; synthetic incident input",
+  "workflow_completed": true,
+  "csv_matches_trace": true,
+  "memory_candidates": 12,
+  "accepted": 0,
+  "withheld": 12,
+  "total_elapsed_ms": 9852,
+  "proposal_recorded": true,
+  "execution_status": "not_executed",
+  "outcome_verified": false,
+  "limitations": [
+    "Self-reported model confidence is not calibrated accuracy.",
+    "Generated runbook reference was not verified against a real runbook.",
+    "No remediation or operational recovery was demonstrated."
+  ]
+}
